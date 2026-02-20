@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
-import { supabase } from './lib/supabase'
+import { supabase, supabaseConfigError } from './lib/supabase'
 
 const TURN_OPTIONS = [45, 60, 75, 90, 105, 120]
 const BLIND_OPTIONS = [
@@ -37,6 +37,26 @@ function App() {
   const [error, setError] = useState('')
 
   const sessionId = useMemo(() => getSessionId(), [])
+
+  if (supabaseConfigError || !supabase) {
+    return (
+      <div className="app">
+        <header>
+          <h1>Cards — Texas Hold’em MVP</h1>
+          <p>Supabase config is missing in this deployed build.</p>
+        </header>
+        <div className="error">
+          {supabaseConfigError || 'Supabase client failed to initialize.'}
+          <br />
+          For GitHub Pages, add repository secrets and redeploy:
+          <br />
+          <code>VITE_SUPABASE_URL</code>
+          <br />
+          <code>VITE_SUPABASE_ANON_KEY</code>
+        </div>
+      </div>
+    )
+  }
 
   const refreshAll = async () => {
     const [playersRes, settingsRes, gameRes] = await Promise.all([
