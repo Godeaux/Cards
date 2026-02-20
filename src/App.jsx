@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 import { supabase, supabaseConfigError } from './lib/supabase'
-import { runShowdown, selfCheck } from './lib/showdown'
+import { runShowdown } from './lib/showdown'
 
 const TURN_OPTIONS = [45, 60, 75, 90, 105, 120]
 const BLIND_OPTIONS = [
@@ -35,16 +35,18 @@ function parseCardList(text) {
     .filter(Boolean)
 }
 
-function defaultPlayerMeta() {
-  return {
-    folded: false,
-    checked: false,
-    pending: true,
-    allIn: false,
-    currentBet: 0,
-    totalCommitted: 0,
-    lastAction: 'none',
+function createShuffledDeck() {
+  const ranks = '23456789TJQKA'.split('')
+  const suits = 'CDHS'.split('')
+  const deck = []
+  for (const r of ranks) {
+    for (const s of suits) deck.push(`${r}${s}`)
   }
+  for (let i = deck.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[deck[i], deck[j]] = [deck[j], deck[i]]
+  }
+  return deck
 }
 
 function App() {
@@ -52,13 +54,12 @@ function App() {
   const [joined, setJoined] = useState(false)
   const [players, setPlayers] = useState([])
   const [settings, setSettings] = useState({ small_blind: 1, big_blind: 2, turn_seconds: 60 })
-  const [gameState, setGameState] = useState({ hand_no: 0, phase: 'waiting', dealer_seat: null, current_turn_session_id: null, pot: 0 })
+  const [gameState, setGameState] = useState({ hand_no: 0, phase: 'waiting', dealer_seat: null, current_turn_session_id: null, pot: 0, hand_state: {} })
   const [countdown, setCountdown] = useState(null)
   const [error, setError] = useState('')
   const [showdownResult, setShowdownResult] = useState(null)
+  const [raiseTo, setRaiseTo] = useState('')
   const [boardInput, setBoardInput] = useState('')
-  const [holeInputs, setHoleInputs] = useState({})
-  const [playerMetaInputs, setPlayerMetaInputs] = useState({})
 
   const sessionId = useMemo(() => getSessionId(), [])
 
@@ -69,18 +70,14 @@ function App() {
           <h1>Cards — Texas Hold’em MVP</h1>
           <p>Supabase config is missing in this deployed build.</p>
         </header>
-        <div className="error">
-          {supabaseConfigError || 'Supabase client failed to initialize.'}
-          <br />
-          For GitHub Pages, add repository secrets and redeploy:
-          <br />
-          <code>VITE_SUPABASE_URL</code>
-          <br />
-          <code>VITE_SUPABASE_ANON_KEY</code>
-        </div>
+        <div className="error">{supabaseConfigError || 'Supabase client failed to initialize.'}</div>
       </div>
     )
   }
+
+  const seatedPlayers = players.filter((p) => p.seat_no !== null).sort((a, b) => a.seat_no - b.seat_no)
+  const hand = gameState.hand_state || {}
+  const handPlayers = hand.playersBySession || {}
 
   const refreshAll = async () => {
     const [playersRes, settingsRes, gameRes] = await Promise.all([
@@ -100,40 +97,26 @@ function App() {
 
   const assignOpenSeat = (currentPlayers) => {
     const used = new Set(currentPlayers.map((p) => p.seat_no).filter((v) => v !== null))
-    for (let i = 1; i <= MAX_PLAYERS; i += 1) {
-      if (!used.has(i)) return i
-    }
+    for (let i = 1; i <= MAX_PLAYERS; i += 1) if (!used.has(i)) return i
     return null
   }
 
   const joinLobby = async () => {
     setError('')
-    if (!username.trim()) {
-      setError('Username is required.')
-      return
-    }
+    if (!username.trim()) return setError('Username is required.')
 
     const { data: currentPlayers, error: currentErr } = await supabase.from('lobby_players').select('*')
     if (currentErr) return setError(currentErr.message)
 
     const seatNo = assignOpenSeat(currentPlayers || [])
-    if (!seatNo) {
-      setError('Lobby is full (8/8).')
-      return
-    }
+    if (!seatNo) return setError('Lobby is full (8/8).')
 
     const { error: upsertError } = await supabase.from('lobby_players').upsert(
-      {
-        session_id: sessionId,
-        username: username.trim(),
-        seat_no: seatNo,
-        heartbeat_at: new Date().toISOString(),
-      },
+      { session_id: sessionId, username: username.trim(), seat_no: seatNo, heartbeat_at: new Date().toISOString() },
       { onConflict: 'session_id' },
     )
 
     if (upsertError) return setError(upsertError.message)
-
     setJoined(true)
     await refreshAll()
   }
@@ -145,97 +128,251 @@ function App() {
   }
 
   const setBlinds = async (sb, bb) => {
-    await supabase
-      .from('table_settings')
-      .update({ small_blind: sb, big_blind: bb, updated_at: new Date().toISOString() })
-      .eq('id', 1)
+    await supabase.from('table_settings').update({ small_blind: sb, big_blind: bb, updated_at: new Date().toISOString() }).eq('id', 1)
   }
 
   const setTurnSeconds = async (seconds) => {
-    await supabase
-      .from('table_settings')
-      .update({ turn_seconds: seconds, updated_at: new Date().toISOString() })
-      .eq('id', 1)
+    await supabase.from('table_settings').update({ turn_seconds: seconds, updated_at: new Date().toISOString() }).eq('id', 1)
   }
 
-  const logAction = async (action, payload = {}) => {
-    const actor = players.find((p) => p.session_id === sessionId)
-    await supabase.from('hand_actions').insert({
-      actor_session_id: sessionId,
-      actor_username: actor?.username || null,
-      action,
-      payload,
-    })
+  const saveGame = async (next) => {
+    const { error: updateError } = await supabase
+      .from('game_state')
+      .update({
+        phase: next.street || gameState.phase,
+        current_turn_session_id: next.actingSessionId || null,
+        pot: next.pot || 0,
+        hand_state: next,
+        last_action_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', 1)
+
+    if (updateError) setError(updateError.message)
   }
 
   const startHand = async () => {
-    const seated = players.filter((p) => p.seat_no !== null)
-    if (seated.length < 2) {
-      setError('Need at least 2 players to start hand.')
-      return
-    }
+    if (seatedPlayers.length < 2) return setError('Need at least 2 players to start hand.')
 
-    const occupiedSeats = seated.map((p) => p.seat_no)
-    const dealerSeat = gameState.dealer_seat
-      ? nextOccupiedSeat(gameState.dealer_seat, occupiedSeats)
-      : Math.min(...occupiedSeats)
-
+    const occupiedSeats = seatedPlayers.map((p) => p.seat_no)
+    const dealerSeat = gameState.dealer_seat ? nextOccupiedSeat(gameState.dealer_seat, occupiedSeats) : Math.min(...occupiedSeats)
     const sbSeat = nextOccupiedSeat(dealerSeat, occupiedSeats)
     const bbSeat = nextOccupiedSeat(sbSeat, occupiedSeats)
-    const turnSeat = nextOccupiedSeat(bbSeat, occupiedSeats)
+    const utgSeat = nextOccupiedSeat(bbSeat, occupiedSeats)
 
-    const sbPlayer = seated.find((p) => p.seat_no === sbSeat)
-    const bbPlayer = seated.find((p) => p.seat_no === bbSeat)
-    const turnPlayer = seated.find((p) => p.seat_no === turnSeat)
+    const deck = createShuffledDeck()
+    const playersBySession = {}
 
-    const pot = settings.small_blind + settings.big_blind
+    for (const p of seatedPlayers) {
+      playersBySession[p.session_id] = {
+        session_id: p.session_id,
+        username: p.username,
+        seat_no: p.seat_no,
+        stack: p.stack,
+        folded: false,
+        allIn: false,
+        checked: false,
+        pending: true,
+        currentBet: 0,
+        totalCommitted: 0,
+        actedStreet: false,
+        holeCards: [deck.pop(), deck.pop()],
+        lastAction: 'dealt',
+      }
+    }
 
-    await supabase
-      .from('game_state')
-      .update({
-        hand_no: (gameState.hand_no || 0) + 1,
-        phase: 'preflop',
-        dealer_seat: dealerSeat,
-        current_turn_session_id: turnPlayer.session_id,
-        pot,
-        last_action_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', 1)
+    const sbPlayer = Object.values(playersBySession).find((p) => p.seat_no === sbSeat)
+    const bbPlayer = Object.values(playersBySession).find((p) => p.seat_no === bbSeat)
+    const postBlind = (pl, amount, label) => {
+      const paid = Math.min(pl.stack, amount)
+      pl.stack -= paid
+      pl.currentBet += paid
+      pl.totalCommitted += paid
+      pl.lastAction = label
+      if (pl.stack === 0) pl.allIn = true
+    }
+    postBlind(sbPlayer, settings.small_blind, 'small_blind')
+    postBlind(bbPlayer, settings.big_blind, 'big_blind')
 
-    await logAction('start_hand', {
+    const handState = {
+      handNo: (gameState.hand_no || 0) + 1,
+      street: 'preflop',
+      boardCards: [],
+      deck,
       dealerSeat,
-      smallBlind: { seat: sbSeat, username: sbPlayer?.username, amount: settings.small_blind },
-      bigBlind: { seat: bbSeat, username: bbPlayer?.username, amount: settings.big_blind },
-      firstToAct: { seat: turnSeat, username: turnPlayer?.username },
-      pot,
-    })
+      smallBlind: settings.small_blind,
+      bigBlind: settings.big_blind,
+      currentBet: Math.max(settings.small_blind, settings.big_blind),
+      minRaise: settings.big_blind,
+      actingSessionId: Object.values(playersBySession).find((p) => p.seat_no === utgSeat)?.session_id,
+      playersBySession,
+      pot: settings.small_blind + settings.big_blind,
+      actionLog: [`Hand #${(gameState.hand_no || 0) + 1} started`],
+      winnerSummary: null,
+    }
+
+    await supabase.from('game_state').update({ hand_no: handState.handNo, dealer_seat: dealerSeat }).eq('id', 1)
+    await saveGame(handState)
   }
 
-  const endTurn = async () => {
-    if (!gameState.current_turn_session_id) return
+  const seatOf = (sid) => handPlayers[sid]?.seat_no
 
-    const seated = players.filter((p) => p.seat_no !== null)
-    const current = seated.find((p) => p.session_id === gameState.current_turn_session_id)
-    if (!current) return
+  const nextActiveSession = (fromSession) => {
+    const active = Object.values(handPlayers)
+      .filter((p) => !p.folded && !p.allIn)
+      .sort((a, b) => a.seat_no - b.seat_no)
+    if (active.length === 0) return null
+    const fromSeat = seatOf(fromSession) || active[0].seat_no
+    const nextSeat = nextOccupiedSeat(fromSeat, active.map((p) => p.seat_no))
+    return active.find((p) => p.seat_no === nextSeat)?.session_id || active[0].session_id
+  }
 
-    const nextSeat = nextOccupiedSeat(current.seat_no, seated.map((p) => p.seat_no))
-    const nextPlayer = seated.find((p) => p.seat_no === nextSeat)
+  const allCanActResolved = (state) => {
+    const ps = Object.values(state.playersBySession)
+    const live = ps.filter((p) => !p.folded)
+    if (live.length <= 1) return true
+    return live.every((p) => p.allIn || (p.actedStreet && p.currentBet === state.currentBet))
+  }
 
-    await supabase
-      .from('game_state')
-      .update({
-        current_turn_session_id: nextPlayer.session_id,
-        last_action_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+  const streetAdvance = (state) => {
+    const ps = Object.values(state.playersBySession)
+    for (const p of ps) {
+      p.currentBet = 0
+      p.checked = false
+      p.pending = !p.folded && !p.allIn
+      p.actedStreet = false
+    }
+    state.currentBet = 0
+    state.minRaise = state.bigBlind
+
+    if (state.street === 'preflop') {
+      state.street = 'flop'
+      state.boardCards.push(state.deck.pop(), state.deck.pop(), state.deck.pop())
+    } else if (state.street === 'flop') {
+      state.street = 'turn'
+      state.boardCards.push(state.deck.pop())
+    } else if (state.street === 'turn') {
+      state.street = 'river'
+      state.boardCards.push(state.deck.pop())
+    } else {
+      state.street = 'showdown'
+    }
+
+    const activeBySeat = ps.filter((p) => !p.folded && !p.allIn).sort((a, b) => a.seat_no - b.seat_no)
+    const firstPostFlopSeat = nextOccupiedSeat(state.dealerSeat, activeBySeat.map((p) => p.seat_no))
+    state.actingSessionId = activeBySeat.find((p) => p.seat_no === firstPostFlopSeat)?.session_id || null
+  }
+
+  const finishHand = async (state) => {
+    const live = Object.values(state.playersBySession).filter((p) => !p.folded)
+    if (live.length === 1) {
+      const w = live[0]
+      w.stack += state.pot
+      w.lastAction = 'wins_uncontested'
+      state.winnerSummary = `${w.username} wins ${state.pot} (everyone else folded)`
+    } else {
+      const result = runShowdown({
+        players: live.map((p) => ({ seat_no: p.seat_no, username: p.username, holeCards: p.holeCards })),
+        boardCards: state.boardCards,
+        pot: state.pot,
       })
-      .eq('id', 1)
+      for (const share of result.potShareList) {
+        const w = Object.values(state.playersBySession).find((p) => p.seat_no === share.seat_no)
+        if (w) w.stack += share.amount
+      }
+      state.winnerSummary = result.potShareList.map((s) => `${s.username} +${s.amount}`).join(' | ')
+      setShowdownResult(result)
+    }
 
-    await logAction('end_turn', {
-      from: current.username,
-      to: nextPlayer.username,
-      nextSeat,
-    })
+    for (const p of Object.values(state.playersBySession)) {
+      await supabase.from('lobby_players').update({ stack: p.stack }).eq('session_id', p.session_id)
+    }
+
+    state.street = 'waiting'
+    state.actingSessionId = null
+    await saveGame(state)
+    await refreshAll()
+  }
+
+  const applyAction = async (type) => {
+    if (!hand.actingSessionId || hand.actingSessionId !== sessionId) return
+    const state = structuredClone(hand)
+    const player = state.playersBySession[sessionId]
+    if (!player) return
+
+    const toCall = Math.max(0, state.currentBet - player.currentBet)
+
+    const commit = (amount) => {
+      const paid = Math.min(amount, player.stack)
+      player.stack -= paid
+      player.currentBet += paid
+      player.totalCommitted += paid
+      state.pot += paid
+      if (player.stack === 0) player.allIn = true
+      return paid
+    }
+
+    if (type === 'fold') {
+      player.folded = true
+      player.pending = false
+      player.lastAction = 'fold'
+      player.actedStreet = true
+    } else if (type === 'check') {
+      if (toCall > 0) return setError('Cannot check, call/raise/fold required.')
+      player.checked = true
+      player.pending = false
+      player.lastAction = 'check'
+      player.actedStreet = true
+    } else if (type === 'call') {
+      commit(toCall)
+      player.pending = false
+      player.lastAction = `call ${toCall}`
+      player.actedStreet = true
+    } else if (type === 'bet') {
+      const betTo = Number(raiseTo || 0)
+      if (!(betTo > state.currentBet)) return setError('Enter a bet/raise amount greater than current bet.')
+      const add = betTo - player.currentBet
+      commit(add)
+      const delta = betTo - state.currentBet
+      state.minRaise = Math.max(state.minRaise, delta)
+      state.currentBet = player.currentBet
+      player.pending = false
+      player.lastAction = `bet/raise to ${player.currentBet}`
+      player.actedStreet = true
+      Object.values(state.playersBySession).forEach((p) => {
+        if (p.session_id !== player.session_id && !p.folded && !p.allIn) p.actedStreet = false
+      })
+    } else if (type === 'allin') {
+      commit(player.stack)
+      if (player.currentBet > state.currentBet) {
+        state.minRaise = Math.max(state.minRaise, player.currentBet - state.currentBet)
+        state.currentBet = player.currentBet
+        Object.values(state.playersBySession).forEach((p) => {
+          if (p.session_id !== player.session_id && !p.folded && !p.allIn) p.actedStreet = false
+        })
+      }
+      player.pending = false
+      player.lastAction = 'all-in'
+      player.actedStreet = true
+    }
+
+    const liveNotFolded = Object.values(state.playersBySession).filter((p) => !p.folded)
+    if (liveNotFolded.length <= 1) return finishHand(state)
+
+    if (allCanActResolved(state)) {
+      streetAdvance(state)
+      if (state.street === 'showdown' || state.street === 'waiting') return finishHand(state)
+    } else {
+      state.actingSessionId = nextActiveSession(sessionId)
+    }
+
+    await saveGame(state)
+  }
+
+  const saveBoardOnly = async () => {
+    const state = structuredClone(hand)
+    state.boardCards = parseCardList(boardInput)
+    await saveGame(state)
   }
 
   useEffect(() => {
@@ -250,10 +387,7 @@ function App() {
 
     const heartbeatTimer = setInterval(async () => {
       if (!joined) return
-      await supabase
-        .from('lobby_players')
-        .update({ heartbeat_at: new Date().toISOString() })
-        .eq('session_id', sessionId)
+      await supabase.from('lobby_players').update({ heartbeat_at: new Date().toISOString() }).eq('session_id', sessionId)
     }, 15000)
 
     return () => {
@@ -263,10 +397,7 @@ function App() {
   }, [joined])
 
   useEffect(() => {
-    if (!gameState.last_action_at || gameState.phase === 'waiting') {
-      setCountdown(null)
-      return
-    }
+    if (!gameState.last_action_at || gameState.phase === 'waiting') return setCountdown(null)
 
     const tick = () => {
       const last = new Date(gameState.last_action_at).getTime()
@@ -281,78 +412,18 @@ function App() {
   }, [gameState.last_action_at, gameState.phase, settings.turn_seconds])
 
   useEffect(() => {
-    const state = gameState?.showdown_state || {}
-    const boardCards = Array.isArray(state.boardCards) ? state.boardCards.join(' ') : ''
-    const holeBySession = state.holeCardsBySession && typeof state.holeCardsBySession === 'object' ? state.holeCardsBySession : {}
-    const metaBySession = state.playerMetaBySession && typeof state.playerMetaBySession === 'object' ? state.playerMetaBySession : {}
+    const b = hand?.boardCards || []
+    setBoardInput(Array.isArray(b) ? b.join(' ') : '')
+  }, [hand?.boardCards])
 
-    setBoardInput(boardCards)
-    setHoleInputs((prev) => ({ ...prev, ...holeBySession }))
-    setPlayerMetaInputs((prev) => ({ ...prev, ...metaBySession }))
-  }, [gameState?.showdown_state])
-
-  const myTurn = gameState.current_turn_session_id === sessionId
-  const seatedPlayers = players.filter((p) => p.seat_no !== null).sort((a, b) => a.seat_no - b.seat_no)
-
-  const saveShowdownState = async () => {
-    const payload = {
-      boardCards: parseCardList(boardInput),
-      holeCardsBySession: holeInputs,
-      playerMetaBySession: playerMetaInputs,
-      updatedAt: new Date().toISOString(),
-    }
-
-    const { error: updateError } = await supabase
-      .from('game_state')
-      .update({ showdown_state: payload, updated_at: new Date().toISOString() })
-      .eq('id', 1)
-
-    if (updateError) {
-      setError(`Failed to save showdown_state: ${updateError.message}`)
-    }
-  }
-
-  const runShowdownFromState = () => {
-    try {
-      const boardCards = parseCardList(boardInput)
-      const activePlayers = seatedPlayers.map((p) => ({
-        seat_no: p.seat_no,
-        username: p.username,
-        holeCards: parseCardList(holeInputs[p.session_id] || ''),
-      }))
-
-      const result = runShowdown({
-        players: activePlayers,
-        boardCards,
-        pot: gameState.pot || 0,
-      })
-
-      const payload = { checks: selfCheck(), result }
-      setShowdownResult(payload)
-      console.log('Showdown from game state:', payload)
-    } catch (e) {
-      setShowdownResult({ error: e.message })
-    }
-  }
-
-  const getMeta = (sessionIdKey) => ({ ...defaultPlayerMeta(), ...(playerMetaInputs[sessionIdKey] || {}) })
-
-  const patchMeta = (sessionIdKey, patch) => {
-    setPlayerMetaInputs((prev) => ({
-      ...prev,
-      [sessionIdKey]: {
-        ...defaultPlayerMeta(),
-        ...(prev[sessionIdKey] || {}),
-        ...patch,
-      },
-    }))
-  }
+  const myPlayer = handPlayers[sessionId]
+  const toCall = myPlayer ? Math.max(0, (hand.currentBet || 0) - (myPlayer.currentBet || 0)) : 0
 
   return (
     <div className="app">
       <header>
-        <h1>Cards — Texas Hold’em MVP</h1>
-        <p>Realtime lobby + first hand lifecycle wiring is now in progress.</p>
+        <h1>Cards — Texas Hold’em (Playable MVP)</h1>
+        <p>Playthrough includes blinds, preflop/flop/turn/river, actions, and showdown.</p>
       </header>
 
       {error && <div className="error">{error}</div>}
@@ -366,35 +437,67 @@ function App() {
           </div>
         ) : (
           <div className="row">
-            <span>
-              Joined as: <strong>{username}</strong>
-            </span>
+            <span>Joined as: <strong>{username}</strong></span>
             <button onClick={leaveLobby}>Leave</button>
           </div>
         )}
       </section>
 
       <section>
-        <h2>Table Settings (shared)</h2>
+        <h2>Table Settings</h2>
         <div className="row wrap">
           <span>Blinds:</span>
-          {BLIND_OPTIONS.map((b) => (
-            <button key={b.label} onClick={() => setBlinds(b.sb, b.bb)}>
-              {b.label}
-            </button>
-          ))}
-          <strong>
-            Current: {settings.small_blind}/{settings.big_blind}
-          </strong>
+          {BLIND_OPTIONS.map((b) => <button key={b.label} onClick={() => setBlinds(b.sb, b.bb)}>{b.label}</button>)}
+          <strong>Current: {settings.small_blind}/{settings.big_blind}</strong>
         </div>
         <div className="row wrap">
           <span>Turn timer:</span>
-          {TURN_OPTIONS.map((t) => (
-            <button key={t} onClick={() => setTurnSeconds(t)}>
-              {t}s
-            </button>
-          ))}
+          {TURN_OPTIONS.map((t) => <button key={t} onClick={() => setTurnSeconds(t)}>{t}s</button>)}
           <strong>Current: {settings.turn_seconds}s</strong>
+        </div>
+      </section>
+
+      <section>
+        <h2>Game State</h2>
+        <div className="row wrap">
+          <strong>Hand #{gameState.hand_no || 0}</strong>
+          <span>Street: {hand.street || 'waiting'}</span>
+          <span>Dealer: {hand.dealerSeat ?? '-'}</span>
+          <span>Pot: {hand.pot ?? gameState.pot ?? 0}</span>
+          <span>Current bet: {hand.currentBet ?? 0}</span>
+          <span>Timer: {countdown ?? '-'}s</span>
+          <button onClick={startHand}>Start New Hand</button>
+        </div>
+        <div className="row wrap" style={{ marginTop: 8 }}>
+          <strong>Board:</strong>
+          <span>{(hand.boardCards || []).join(' ') || '—'}</span>
+        </div>
+        {hand.winnerSummary && <div style={{ marginTop: 8 }}><strong>Result:</strong> {hand.winnerSummary}</div>}
+      </section>
+
+      <section>
+        <h2>Your Hand & Actions</h2>
+        <div className="row wrap">
+          <strong>Your cards:</strong>
+          <span>{myPlayer?.holeCards?.join(' ') || '—'}</span>
+        </div>
+        <div className="row wrap" style={{ marginTop: 8 }}>
+          <span>To call: {toCall}</span>
+          <span>Your stack: {myPlayer?.stack ?? '-'}</span>
+          <span>Your committed: {myPlayer?.totalCommitted ?? '-'}</span>
+        </div>
+        <div className="row wrap" style={{ marginTop: 10 }}>
+          <button disabled={hand.actingSessionId !== sessionId} onClick={() => applyAction('fold')}>Fold</button>
+          <button disabled={hand.actingSessionId !== sessionId || toCall > 0} onClick={() => applyAction('check')}>Check</button>
+          <button disabled={hand.actingSessionId !== sessionId || toCall === 0} onClick={() => applyAction('call')}>Call</button>
+          <input
+            placeholder="Raise to"
+            value={raiseTo}
+            onChange={(e) => setRaiseTo(e.target.value)}
+            style={{ width: 110 }}
+          />
+          <button disabled={hand.actingSessionId !== sessionId} onClick={() => applyAction('bet')}>Bet/Raise To</button>
+          <button disabled={hand.actingSessionId !== sessionId} onClick={() => applyAction('allin')}>All-in</button>
         </div>
       </section>
 
@@ -402,24 +505,21 @@ function App() {
         <h2>Table / Seats ({seatedPlayers.length}/8)</h2>
         <div className="seat-grid">
           {seatedPlayers.map((p) => {
-            const meta = getMeta(p.session_id)
-            const isTurn = gameState.current_turn_session_id === p.session_id
+            const s = handPlayers[p.session_id]
+            const isTurn = hand.actingSessionId === p.session_id
             return (
               <div className="seat-card" key={p.session_id}>
                 <div className="seat-head">
-                  <strong>
-                    Seat {p.seat_no}: {p.username}
-                  </strong>
+                  <strong>Seat {p.seat_no}: {p.username}</strong>
                   <span>{isTurn ? '🎯 Acting' : '—'}</span>
                 </div>
                 <div className="seat-meta">
-                  <span>Stack: {p.stack}</span>
-                  <span>Pot: {gameState.pot || 0}</span>
-                  <span>Current Bet: {Number(meta.currentBet) || 0}</span>
-                  <span>Total Committed: {Number(meta.totalCommitted) || 0}</span>
-                  <span>Status: {meta.folded ? 'Folded' : meta.pending ? 'Pending' : meta.checked ? 'Checked' : 'Active'}</span>
-                  <span>All-in: {meta.allIn ? 'Yes' : 'No'}</span>
-                  <span>Last Action: {meta.lastAction || 'none'}</span>
+                  <span>Stack: {s?.stack ?? p.stack}</span>
+                  <span>Hole: {p.session_id === sessionId || hand.street === 'waiting' ? (s?.holeCards?.join(' ') || '—') : '🂠 🂠'}</span>
+                  <span>Current Bet: {s?.currentBet ?? 0}</span>
+                  <span>Committed: {s?.totalCommitted ?? 0}</span>
+                  <span>Status: {s?.folded ? 'Folded' : s?.allIn ? 'All-in' : s?.pending ? 'Pending' : s?.checked ? 'Checked' : 'Active'}</span>
+                  <span>Last Action: {s?.lastAction || '—'}</span>
                 </div>
               </div>
             )
@@ -428,124 +528,19 @@ function App() {
       </section>
 
       <section>
-        <h2>Hand State</h2>
+        <h2>Manual Board Override (debug)</h2>
         <div className="row wrap">
-          <strong>Hand #{gameState.hand_no || 0}</strong>
-          <span>Phase: {gameState.phase}</span>
-          <span>Dealer seat: {gameState.dealer_seat ?? '-'}</span>
-          <span>Pot: {gameState.pot ?? 0}</span>
-          <span>Timer: {countdown ?? '-'}s</span>
-          <span>{myTurn ? '✅ Your turn' : '⏳ Waiting'}</span>
-        </div>
-        <div className="row wrap" style={{ marginTop: 10 }}>
-          <button onClick={startHand}>Start New Hand</button>
-          <button onClick={endTurn} disabled={!myTurn}>
-            End Turn (test)
-          </button>
+          <input placeholder="AS KD QH JC TD" value={boardInput} onChange={(e) => setBoardInput(e.target.value)} style={{ minWidth: 260 }} />
+          <button onClick={saveBoardOnly}>Save Board</button>
         </div>
       </section>
 
-      <section>
-        <h2>Showdown (real game-state objects)</h2>
-        <div className="row wrap" style={{ marginBottom: 8 }}>
-          <label>Board cards (5):</label>
-          <input
-            placeholder="AS KD QH JC TD"
-            value={boardInput}
-            onChange={(e) => setBoardInput(e.target.value)}
-            style={{ minWidth: 260 }}
-          />
-        </div>
-
-        {seatedPlayers.map((p) => {
-          const meta = getMeta(p.session_id)
-          return (
-            <div className="seat-editor" key={p.session_id}>
-              <div className="row wrap" style={{ marginBottom: 6 }}>
-                <label>
-                  Seat {p.seat_no} {p.username} hole cards:
-                </label>
-                <input
-                  placeholder="AH KH"
-                  value={holeInputs[p.session_id] || ''}
-                  onChange={(e) =>
-                    setHoleInputs((prev) => ({
-                      ...prev,
-                      [p.session_id]: e.target.value,
-                    }))
-                  }
-                  style={{ minWidth: 180 }}
-                />
-                <input
-                  type="number"
-                  placeholder="Current bet"
-                  value={meta.currentBet}
-                  onChange={(e) => patchMeta(p.session_id, { currentBet: Number(e.target.value) || 0 })}
-                  style={{ width: 120 }}
-                />
-                <input
-                  type="number"
-                  placeholder="Committed"
-                  value={meta.totalCommitted}
-                  onChange={(e) => patchMeta(p.session_id, { totalCommitted: Number(e.target.value) || 0 })}
-                  style={{ width: 120 }}
-                />
-                <input
-                  placeholder="Last action"
-                  value={meta.lastAction}
-                  onChange={(e) => patchMeta(p.session_id, { lastAction: e.target.value })}
-                  style={{ minWidth: 140 }}
-                />
-              </div>
-              <div className="row wrap" style={{ marginBottom: 8 }}>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={!!meta.folded}
-                    onChange={(e) => patchMeta(p.session_id, { folded: e.target.checked, pending: e.target.checked ? false : meta.pending })}
-                  />{' '}
-                  folded
-                </label>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={!!meta.checked}
-                    onChange={(e) => patchMeta(p.session_id, { checked: e.target.checked, pending: e.target.checked ? false : meta.pending })}
-                  />{' '}
-                  checked
-                </label>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={!!meta.pending}
-                    onChange={(e) => patchMeta(p.session_id, { pending: e.target.checked })}
-                  />{' '}
-                  pending
-                </label>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={!!meta.allIn}
-                    onChange={(e) => patchMeta(p.session_id, { allIn: e.target.checked })}
-                  />{' '}
-                  all-in
-                </label>
-              </div>
-            </div>
-          )
-        })}
-
-        <div className="row wrap" style={{ marginTop: 10 }}>
-          <button onClick={saveShowdownState}>Save to game_state.showdown_state</button>
-          <button onClick={runShowdownFromState}>Run Showdown from Current State</button>
-        </div>
-
-        {showdownResult && (
-          <pre style={{ marginTop: 10, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            {JSON.stringify(showdownResult, null, 2)}
-          </pre>
-        )}
-      </section>
+      {showdownResult && (
+        <section>
+          <h2>Showdown Result</h2>
+          <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{JSON.stringify(showdownResult, null, 2)}</pre>
+        </section>
+      )}
     </div>
   )
 }

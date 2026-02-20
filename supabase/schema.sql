@@ -29,12 +29,16 @@ create table if not exists public.game_state (
  current_turn_session_id text,
  pot int not null default 0,
  showdown_state jsonb not null default '{}'::jsonb,
+ hand_state jsonb not null default '{}'::jsonb,
  last_action_at timestamptz,
  updated_at timestamptz not null default now()
 );
 
 alter table public.game_state
   add column if not exists showdown_state jsonb not null default '{}'::jsonb;
+
+alter table public.game_state
+  add column if not exists hand_state jsonb not null default '{}'::jsonb;
 
 insert into public.table_settings (id, small_blind, big_blind, turn_seconds)
 values (1, 1, 2, 60)
