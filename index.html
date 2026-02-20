@@ -2,12 +2,52 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>cards</title>
+    <title>Cards — Texas Hold'em MVP</title>
+    <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+    <main class="app">
+      <header>
+        <h1>Cards — Texas Hold'em MVP</h1>
+        <p>No build tools. Pure HTML/CSS/JS + Supabase realtime.</p>
+      </header>
+
+      <div id="error" class="error hidden"></div>
+
+      <section>
+        <h2>Join Lobby</h2>
+        <div class="row">
+          <input id="username" placeholder="Enter username" maxlength="20" />
+          <button id="joinBtn">Join Lobby</button>
+          <button id="leaveBtn" class="hidden">Leave</button>
+        </div>
+        <p id="whoami"></p>
+      </section>
+
+      <section>
+        <h2>Table Settings (shared)</h2>
+        <div class="row wrap" id="blindButtons"></div>
+        <div class="row wrap" id="timerButtons"></div>
+        <p id="currentSettings"></p>
+      </section>
+
+      <section>
+        <h2>Players (<span id="playerCount">0</span>/8)</h2>
+        <ul id="players"></ul>
+      </section>
+
+      <section>
+        <h2>Hand State</h2>
+        <p id="handState"></p>
+        <div class="row wrap">
+          <button id="startHandBtn">Start New Hand</button>
+          <button id="endTurnBtn">End Turn (test)</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="config.js"></script>
+    <script type="module" src="app.js"></script>
   </body>
 </html>
