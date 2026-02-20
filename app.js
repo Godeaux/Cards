@@ -40,6 +40,7 @@ const state = {
   players: [],
   settings: { small_blind: 1, big_blind: 2, turn_seconds: 60 },
   game: { hand_no: 0, phase: 'waiting', dealer_seat: null, current_turn_session_id: null, pot: 0, last_action_at: null },
+  gameTableMissing: false,
 }
 
 function getSessionId() {
@@ -78,16 +79,28 @@ async function refreshAll() {
   const [playersRes, settingsRes, gameRes] = await Promise.all([
     supabase.from('lobby_players').select('*').order('seat_no', { ascending: true }),
     supabase.from('table_settings').select('*').eq('id', 1).single(),
-    supabase.from('game_state').select('*').eq('id', 1).single(),
+    supabase.from('game_state').select('*').eq('id', 1).maybeSingle(),
   ])
 
   if (playersRes.error) throw playersRes.error
   if (settingsRes.error) throw settingsRes.error
-  if (gameRes.error) throw gameRes.error
 
   state.players = playersRes.data || []
   state.settings = settingsRes.data
-  state.game = gameRes.data
+
+  if (gameRes.error) {
+    const msg = gameRes.error.message || ''
+    if (msg.includes("Could not find the table 'public.game_state'")) {
+      state.gameTableMissing = true
+      state.game = { hand_no: 0, phase: 'waiting', dealer_seat: null, current_turn_session_id: null, pot: 0, last_action_at: null }
+      showError("Backend missing table: public.game_state. Lobby works now; hand controls are disabled until table exists.")
+    } else {
+      throw gameRes.error
+    }
+  } else {
+    state.gameTableMissing = false
+    state.game = gameRes.data || { hand_no: 0, phase: 'waiting', dealer_seat: null, current_turn_session_id: null, pot: 0, last_action_at: null }
+  }
 
   const me = state.players.find((p) => p.session_id === state.sessionId)
   state.joined = !!me
@@ -109,8 +122,11 @@ function render() {
 
   const myTurn = state.game.current_turn_session_id === state.sessionId
   const timer = getRemainingTimer()
-  handStateEl.textContent = `Hand #${state.game.hand_no || 0} • Phase ${state.game.phase} • Dealer seat ${state.game.dealer_seat ?? '-'} • Pot ${state.game.pot || 0} • Timer ${timer}s • ${myTurn ? 'YOUR TURN' : 'waiting'}`
-  endTurnBtn.disabled = !myTurn
+  handStateEl.textContent = state.gameTableMissing
+    ? 'Hand engine unavailable: missing public.game_state table in Supabase.'
+    : `Hand #${state.game.hand_no || 0} • Phase ${state.game.phase} • Dealer seat ${state.game.dealer_seat ?? '-'} • Pot ${state.game.pot || 0} • Timer ${timer}s • ${myTurn ? 'YOUR TURN' : 'waiting'}`
+  startHandBtn.disabled = state.gameTableMissing
+  endTurnBtn.disabled = state.gameTableMissing || !myTurn
 }
 
 function getRemainingTimer() {
@@ -172,6 +188,7 @@ async function logAction(action, payload = {}) {
 
 async function startHand() {
   clearError()
+  if (state.gameTableMissing) return showError("Cannot start hand: missing table public.game_state in Supabase.")
   const seated = state.players.filter((p) => p.seat_no != null)
   if (seated.length < 2) return showError('Need at least 2 players to start.')
 
@@ -202,6 +219,7 @@ async function startHand() {
 
 async function endTurn() {
   clearError()
+  if (state.gameTableMissing) return showError("Cannot end turn: missing table public.game_state in Supabase.")
   const current = state.players.find((p) => p.session_id === state.game.current_turn_session_id)
   if (!current) return
 
