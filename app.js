@@ -7,7 +7,10 @@ const BLIND_OPTIONS = [
 ]
 const MAX_PLAYERS = 8
 
-const cfg = window.CARDS_CONFIG || {}
+const cfg = window.CARDS_CONFIG || {
+  supabaseUrl: 'https://oiltjegxfwjdvuzbsyfv.supabase.co',
+  supabaseAnonKey: 'sb_publishable_7rNCoUWbz3FnDY4VdIvCbg_9R-LuirL',
+}
 const errorEl = document.getElementById('error')
 
 if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) {
