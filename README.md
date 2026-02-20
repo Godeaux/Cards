@@ -1,15 +1,21 @@
 # Cards (Texas Hold'em MVP)
 
-Minimalist, friends-only Texas Hold'em web app.
-
-## Current status
-
+Playable multiplayer Hold'em prototype using:
 - React + Vite frontend
-- Supabase realtime lobby scaffold
-- Shared table settings (blinds, turn timer)
-- Initial hand lifecycle scaffold (dealer rotation + turn handoff)
+- Supabase realtime state
 
-## Local development
+## Features now
+
+- Lobby + seat assignment (up to 8)
+- Shared table settings (blinds, turn timer)
+- Playable hand flow:
+  - preflop / flop / turn / river
+  - fold / check / call / raise-to / all-in
+  - showdown + payout
+- Text-first table UI with seat-by-seat state
+- Personal hand/action panel
+
+## Local dev
 
 ```bash
 npm install
@@ -25,23 +31,16 @@ VITE_SUPABASE_ANON_KEY=...
 
 ## Supabase setup
 
-Run `supabase/schema.sql` in Supabase SQL editor.
+Use **one file**:
 
-Enable Realtime for:
-- `lobby_players`
-- `table_settings`
-- `game_state` (recommended for hand state sync)
+- `supabase/full-setup.sql`
 
-## GitHub Pages deployment
+Paste it into Supabase SQL editor and run.
 
-This repo uses `.github/workflows/deploy-pages.yml`.
+## Deploy
+
+GitHub Pages workflow is in `.github/workflows/deploy-pages.yml`.
 
 Set repository secrets:
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
-
-Then push to `main` (or run the workflow manually).
-
-Pages URL should be:
-
-`https://godeaux.github.io/Cards/`
