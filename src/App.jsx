@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 import { supabase, supabaseConfigError } from './lib/supabase'
+import { runShowdown, selfCheck } from './lib/showdown'
 
 const TURN_OPTIONS = [45, 60, 75, 90, 105, 120]
 const BLIND_OPTIONS = [
@@ -27,6 +28,25 @@ function nextOccupiedSeat(fromSeat, occupiedSeats) {
   return sorted[0]
 }
 
+function parseCardList(text) {
+  return text
+    .split(/[,\s]+/)
+    .map((c) => c.trim())
+    .filter(Boolean)
+}
+
+function defaultPlayerMeta() {
+  return {
+    folded: false,
+    checked: false,
+    pending: true,
+    allIn: false,
+    currentBet: 0,
+    totalCommitted: 0,
+    lastAction: 'none',
+  }
+}
+
 function App() {
   const [username, setUsername] = useState('')
   const [joined, setJoined] = useState(false)
@@ -35,6 +55,10 @@ function App() {
   const [gameState, setGameState] = useState({ hand_no: 0, phase: 'waiting', dealer_seat: null, current_turn_session_id: null, pot: 0 })
   const [countdown, setCountdown] = useState(null)
   const [error, setError] = useState('')
+  const [showdownResult, setShowdownResult] = useState(null)
+  const [boardInput, setBoardInput] = useState('')
+  const [holeInputs, setHoleInputs] = useState({})
+  const [playerMetaInputs, setPlayerMetaInputs] = useState({})
 
   const sessionId = useMemo(() => getSessionId(), [])
 
@@ -256,7 +280,73 @@ function App() {
     return () => clearInterval(id)
   }, [gameState.last_action_at, gameState.phase, settings.turn_seconds])
 
+  useEffect(() => {
+    const state = gameState?.showdown_state || {}
+    const boardCards = Array.isArray(state.boardCards) ? state.boardCards.join(' ') : ''
+    const holeBySession = state.holeCardsBySession && typeof state.holeCardsBySession === 'object' ? state.holeCardsBySession : {}
+    const metaBySession = state.playerMetaBySession && typeof state.playerMetaBySession === 'object' ? state.playerMetaBySession : {}
+
+    setBoardInput(boardCards)
+    setHoleInputs((prev) => ({ ...prev, ...holeBySession }))
+    setPlayerMetaInputs((prev) => ({ ...prev, ...metaBySession }))
+  }, [gameState?.showdown_state])
+
   const myTurn = gameState.current_turn_session_id === sessionId
+  const seatedPlayers = players.filter((p) => p.seat_no !== null).sort((a, b) => a.seat_no - b.seat_no)
+
+  const saveShowdownState = async () => {
+    const payload = {
+      boardCards: parseCardList(boardInput),
+      holeCardsBySession: holeInputs,
+      playerMetaBySession: playerMetaInputs,
+      updatedAt: new Date().toISOString(),
+    }
+
+    const { error: updateError } = await supabase
+      .from('game_state')
+      .update({ showdown_state: payload, updated_at: new Date().toISOString() })
+      .eq('id', 1)
+
+    if (updateError) {
+      setError(`Failed to save showdown_state: ${updateError.message}`)
+    }
+  }
+
+  const runShowdownFromState = () => {
+    try {
+      const boardCards = parseCardList(boardInput)
+      const activePlayers = seatedPlayers.map((p) => ({
+        seat_no: p.seat_no,
+        username: p.username,
+        holeCards: parseCardList(holeInputs[p.session_id] || ''),
+      }))
+
+      const result = runShowdown({
+        players: activePlayers,
+        boardCards,
+        pot: gameState.pot || 0,
+      })
+
+      const payload = { checks: selfCheck(), result }
+      setShowdownResult(payload)
+      console.log('Showdown from game state:', payload)
+    } catch (e) {
+      setShowdownResult({ error: e.message })
+    }
+  }
+
+  const getMeta = (sessionIdKey) => ({ ...defaultPlayerMeta(), ...(playerMetaInputs[sessionIdKey] || {}) })
+
+  const patchMeta = (sessionIdKey, patch) => {
+    setPlayerMetaInputs((prev) => ({
+      ...prev,
+      [sessionIdKey]: {
+        ...defaultPlayerMeta(),
+        ...(prev[sessionIdKey] || {}),
+        ...patch,
+      },
+    }))
+  }
 
   return (
     <div className="app">
@@ -309,14 +399,32 @@ function App() {
       </section>
 
       <section>
-        <h2>Players ({players.length}/8)</h2>
-        <ul>
-          {players.map((p) => (
-            <li key={p.id}>
-              Seat {p.seat_no}: {p.username} — stack {p.stack}
-            </li>
-          ))}
-        </ul>
+        <h2>Table / Seats ({seatedPlayers.length}/8)</h2>
+        <div className="seat-grid">
+          {seatedPlayers.map((p) => {
+            const meta = getMeta(p.session_id)
+            const isTurn = gameState.current_turn_session_id === p.session_id
+            return (
+              <div className="seat-card" key={p.session_id}>
+                <div className="seat-head">
+                  <strong>
+                    Seat {p.seat_no}: {p.username}
+                  </strong>
+                  <span>{isTurn ? '🎯 Acting' : '—'}</span>
+                </div>
+                <div className="seat-meta">
+                  <span>Stack: {p.stack}</span>
+                  <span>Pot: {gameState.pot || 0}</span>
+                  <span>Current Bet: {Number(meta.currentBet) || 0}</span>
+                  <span>Total Committed: {Number(meta.totalCommitted) || 0}</span>
+                  <span>Status: {meta.folded ? 'Folded' : meta.pending ? 'Pending' : meta.checked ? 'Checked' : 'Active'}</span>
+                  <span>All-in: {meta.allIn ? 'Yes' : 'No'}</span>
+                  <span>Last Action: {meta.lastAction || 'none'}</span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
       </section>
 
       <section>
@@ -335,6 +443,108 @@ function App() {
             End Turn (test)
           </button>
         </div>
+      </section>
+
+      <section>
+        <h2>Showdown (real game-state objects)</h2>
+        <div className="row wrap" style={{ marginBottom: 8 }}>
+          <label>Board cards (5):</label>
+          <input
+            placeholder="AS KD QH JC TD"
+            value={boardInput}
+            onChange={(e) => setBoardInput(e.target.value)}
+            style={{ minWidth: 260 }}
+          />
+        </div>
+
+        {seatedPlayers.map((p) => {
+          const meta = getMeta(p.session_id)
+          return (
+            <div className="seat-editor" key={p.session_id}>
+              <div className="row wrap" style={{ marginBottom: 6 }}>
+                <label>
+                  Seat {p.seat_no} {p.username} hole cards:
+                </label>
+                <input
+                  placeholder="AH KH"
+                  value={holeInputs[p.session_id] || ''}
+                  onChange={(e) =>
+                    setHoleInputs((prev) => ({
+                      ...prev,
+                      [p.session_id]: e.target.value,
+                    }))
+                  }
+                  style={{ minWidth: 180 }}
+                />
+                <input
+                  type="number"
+                  placeholder="Current bet"
+                  value={meta.currentBet}
+                  onChange={(e) => patchMeta(p.session_id, { currentBet: Number(e.target.value) || 0 })}
+                  style={{ width: 120 }}
+                />
+                <input
+                  type="number"
+                  placeholder="Committed"
+                  value={meta.totalCommitted}
+                  onChange={(e) => patchMeta(p.session_id, { totalCommitted: Number(e.target.value) || 0 })}
+                  style={{ width: 120 }}
+                />
+                <input
+                  placeholder="Last action"
+                  value={meta.lastAction}
+                  onChange={(e) => patchMeta(p.session_id, { lastAction: e.target.value })}
+                  style={{ minWidth: 140 }}
+                />
+              </div>
+              <div className="row wrap" style={{ marginBottom: 8 }}>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={!!meta.folded}
+                    onChange={(e) => patchMeta(p.session_id, { folded: e.target.checked, pending: e.target.checked ? false : meta.pending })}
+                  />{' '}
+                  folded
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={!!meta.checked}
+                    onChange={(e) => patchMeta(p.session_id, { checked: e.target.checked, pending: e.target.checked ? false : meta.pending })}
+                  />{' '}
+                  checked
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={!!meta.pending}
+                    onChange={(e) => patchMeta(p.session_id, { pending: e.target.checked })}
+                  />{' '}
+                  pending
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={!!meta.allIn}
+                    onChange={(e) => patchMeta(p.session_id, { allIn: e.target.checked })}
+                  />{' '}
+                  all-in
+                </label>
+              </div>
+            </div>
+          )
+        })}
+
+        <div className="row wrap" style={{ marginTop: 10 }}>
+          <button onClick={saveShowdownState}>Save to game_state.showdown_state</button>
+          <button onClick={runShowdownFromState}>Run Showdown from Current State</button>
+        </div>
+
+        {showdownResult && (
+          <pre style={{ marginTop: 10, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {JSON.stringify(showdownResult, null, 2)}
+          </pre>
+        )}
       </section>
     </div>
   )

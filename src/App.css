@@ -50,6 +50,13 @@ input {
   border-radius: 8px;
 }
 
+input[type='checkbox'] {
+  padding: 0;
+  width: 14px;
+  height: 14px;
+  accent-color: #4f7cff;
+}
+
 button {
   background: #233050;
   border: 1px solid #344971;
@@ -81,4 +88,39 @@ code {
   border: 1px solid #29395a;
   border-radius: 6px;
   padding: 2px 6px;
+}
+
+.seat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.seat-card {
+  background: #0d1320;
+  border: 1px solid #2d3a59;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.seat-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.seat-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+  font-size: 0.9rem;
+}
+
+.seat-editor {
+  background: #0d1320;
+  border: 1px solid #2d3a59;
+  border-radius: 10px;
+  padding: 10px;
+  margin-bottom: 8px;
 }
