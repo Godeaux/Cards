@@ -67,7 +67,7 @@ function App() {
     return (
       <div className="app">
         <header>
-          <h1>Cards — Texas Hold’em MVP</h1>
+          <h1>Cards - Texas Hold'em MVP</h1>
           <p>Supabase config is missing in this deployed build.</p>
         </header>
         <div className="error">{supabaseConfigError || 'Supabase client failed to initialize.'}</div>
@@ -248,14 +248,18 @@ function App() {
     if (state.street === 'preflop') {
       state.street = 'flop'
       state.boardCards.push(state.deck.pop(), state.deck.pop(), state.deck.pop())
+      state.actionLog?.push(`Flop: ${state.boardCards.join(' ')}`)
     } else if (state.street === 'flop') {
       state.street = 'turn'
       state.boardCards.push(state.deck.pop())
+      state.actionLog?.push(`Turn: ${state.boardCards.join(' ')}`)
     } else if (state.street === 'turn') {
       state.street = 'river'
       state.boardCards.push(state.deck.pop())
+      state.actionLog?.push(`River: ${state.boardCards.join(' ')}`)
     } else {
       state.street = 'showdown'
+      state.actionLog?.push('Showdown')
     }
 
     const activeBySeat = ps.filter((p) => !p.folded && !p.allIn).sort((a, b) => a.seat_no - b.seat_no)
@@ -317,17 +321,20 @@ function App() {
       player.pending = false
       player.lastAction = 'fold'
       player.actedStreet = true
+      state.actionLog?.push(`${player.username}: fold`)
     } else if (type === 'check') {
       if (toCall > 0) return setError('Cannot check, call/raise/fold required.')
       player.checked = true
       player.pending = false
       player.lastAction = 'check'
       player.actedStreet = true
+      state.actionLog?.push(`${player.username}: check`)
     } else if (type === 'call') {
       commit(toCall)
       player.pending = false
       player.lastAction = `call ${toCall}`
       player.actedStreet = true
+      state.actionLog?.push(`${player.username}: call ${toCall}`)
     } else if (type === 'bet') {
       const betTo = Number(raiseTo || 0)
       if (!(betTo > state.currentBet)) return setError('Enter a bet/raise amount greater than current bet.')
@@ -339,6 +346,7 @@ function App() {
       player.pending = false
       player.lastAction = `bet/raise to ${player.currentBet}`
       player.actedStreet = true
+      state.actionLog?.push(`${player.username}: raise to ${player.currentBet}`)
       Object.values(state.playersBySession).forEach((p) => {
         if (p.session_id !== player.session_id && !p.folded && !p.allIn) p.actedStreet = false
       })
@@ -354,6 +362,7 @@ function App() {
       player.pending = false
       player.lastAction = 'all-in'
       player.actedStreet = true
+      state.actionLog?.push(`${player.username}: all-in (${player.currentBet})`)
     }
 
     const liveNotFolded = Object.values(state.playersBySession).filter((p) => !p.folded)
@@ -422,7 +431,7 @@ function App() {
   return (
     <div className="app">
       <header>
-        <h1>Cards — Texas Hold’em (Playable MVP)</h1>
+        <h1>Cards - Texas Hold'em (Playable MVP)</h1>
         <p>Playthrough includes blinds, preflop/flop/turn/river, actions, and showdown.</p>
       </header>
 
@@ -470,22 +479,31 @@ function App() {
         </div>
         <div className="row wrap" style={{ marginTop: 8 }}>
           <strong>Board:</strong>
-          <span>{(hand.boardCards || []).join(' ') || '—'}</span>
+          <span>{(hand.boardCards || []).join(' ') || '-'}</span>
         </div>
         {hand.winnerSummary && <div style={{ marginTop: 8 }}><strong>Result:</strong> {hand.winnerSummary}</div>}
       </section>
 
       <section>
         <h2>Your Hand & Actions</h2>
-        <div className="row wrap">
-          <strong>Your cards:</strong>
-          <span>{myPlayer?.holeCards?.join(' ') || '—'}</span>
-        </div>
-        <div className="row wrap" style={{ marginTop: 8 }}>
-          <span>To call: {toCall}</span>
-          <span>Your stack: {myPlayer?.stack ?? '-'}</span>
-          <span>Your committed: {myPlayer?.totalCommitted ?? '-'}</span>
-        </div>
+        {!myPlayer ? (
+          <p>
+            You are not currently in the active hand. Join a seat first, then click <strong>Start New Hand</strong> to be dealt cards.
+          </p>
+        ) : (
+          <>
+            <div className="row wrap">
+              <strong>Your cards:</strong>
+              <span>{myPlayer?.holeCards?.join(' ') || '-'}</span>
+            </div>
+            <div className="row wrap" style={{ marginTop: 8 }}>
+              <span>To call: {toCall}</span>
+              <span>Your stack: {myPlayer?.stack ?? '-'}</span>
+              <span>Your committed: {myPlayer?.totalCommitted ?? '-'}</span>
+              <span>Status: {myPlayer?.folded ? 'Folded' : myPlayer?.allIn ? 'All-in' : hand.actingSessionId === sessionId ? 'Your turn' : 'Waiting'}</span>
+            </div>
+          </>
+        )}
         <div className="row wrap" style={{ marginTop: 10 }}>
           <button disabled={hand.actingSessionId !== sessionId} onClick={() => applyAction('fold')}>Fold</button>
           <button disabled={hand.actingSessionId !== sessionId || toCall > 0} onClick={() => applyAction('check')}>Check</button>
@@ -511,19 +529,34 @@ function App() {
               <div className="seat-card" key={p.session_id}>
                 <div className="seat-head">
                   <strong>Seat {p.seat_no}: {p.username}</strong>
-                  <span>{isTurn ? '🎯 Acting' : '—'}</span>
+                  <span>{isTurn ? '🎯 Acting' : '-'}</span>
                 </div>
                 <div className="seat-meta">
                   <span>Stack: {s?.stack ?? p.stack}</span>
-                  <span>Hole: {p.session_id === sessionId || hand.street === 'waiting' ? (s?.holeCards?.join(' ') || '—') : '🂠 🂠'}</span>
+                  <span>Hole: {p.session_id === sessionId || hand.street === 'waiting' ? (s?.holeCards?.join(' ') || '-') : '🂠 🂠'}</span>
                   <span>Current Bet: {s?.currentBet ?? 0}</span>
                   <span>Committed: {s?.totalCommitted ?? 0}</span>
                   <span>Status: {s?.folded ? 'Folded' : s?.allIn ? 'All-in' : s?.pending ? 'Pending' : s?.checked ? 'Checked' : 'Active'}</span>
-                  <span>Last Action: {s?.lastAction || '—'}</span>
+                  <span>Last Action: {s?.lastAction || '-'}</span>
                 </div>
               </div>
             )
           })}
+        </div>
+      </section>
+
+      <section>
+        <h2>Hand Log</h2>
+        <div>
+          {(hand.actionLog || []).length === 0 ? (
+            <p>No actions yet.</p>
+          ) : (
+            <ul>
+              {(hand.actionLog || []).slice(-12).map((line, idx) => (
+                <li key={`${idx}-${line}`}>{line}</li>
+              ))}
+            </ul>
+          )}
         </div>
       </section>
 
