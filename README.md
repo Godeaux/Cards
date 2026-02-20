@@ -1,16 +1,47 @@
-# React + Vite
+# Cards (Texas Hold'em MVP)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Minimalist, friends-only Texas Hold'em web app.
 
-Currently, two official plugins are available:
+## Current status
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- React + Vite frontend
+- Supabase realtime lobby scaffold
+- Shared table settings (blinds, turn timer)
+- Initial hand lifecycle scaffold (dealer rotation + turn handoff)
 
-## React Compiler
+## Local development
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+npm install
+npm run dev
+```
 
-## Expanding the ESLint configuration
+Create `.env.local`:
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```env
+VITE_SUPABASE_URL=...
+VITE_SUPABASE_ANON_KEY=...
+```
+
+## Supabase setup
+
+Run `supabase/schema.sql` in Supabase SQL editor.
+
+Enable Realtime for:
+- `lobby_players`
+- `table_settings`
+- `game_state` (recommended for hand state sync)
+
+## GitHub Pages deployment
+
+This repo uses `.github/workflows/deploy-pages.yml`.
+
+Set repository secrets:
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+
+Then push to `main` (or run the workflow manually).
+
+Pages URL should be:
+
+`https://godeaux.github.io/Cards/`
