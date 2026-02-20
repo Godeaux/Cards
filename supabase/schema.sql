@@ -21,8 +21,23 @@ create table if not exists public.table_settings (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.game_state (
+  id int primary key default 1,
+  hand_no int not null default 0,
+  phase text not null default 'waiting',
+  dealer_seat int,
+ current_turn_session_id text,
+ pot int not null default 0,
+ last_action_at timestamptz,
+ updated_at timestamptz not null default now()
+);
+
 insert into public.table_settings (id, small_blind, big_blind, turn_seconds)
 values (1, 1, 2, 60)
+on conflict (id) do nothing;
+
+insert into public.game_state (id, hand_no, phase, pot)
+values (1, 0, 'waiting', 0)
 on conflict (id) do nothing;
 
 create table if not exists public.hand_actions (
@@ -37,6 +52,7 @@ create table if not exists public.hand_actions (
 -- MVP simplicity: disable RLS so guests can use anon key directly.
 alter table public.lobby_players disable row level security;
 alter table public.table_settings disable row level security;
+alter table public.game_state disable row level security;
 alter table public.hand_actions disable row level security;
 
 -- Cleanup helper (optional): remove stale players not seen for > 5 minutes.
