@@ -18,7 +18,37 @@
       .board { display: flex; gap: 8px; flex-wrap: wrap; min-height: 44px; align-items: center; }
       .card-pill { display:inline-flex; align-items:center; justify-content:center; min-width:38px; height:46px; border-radius:8px; border:1px solid #5a6b8f; background:#f5f7ff; color:#0a0f1d; font-weight:800; }
       .card-pill.red { color:#b3132c; }
-      .seat { background: #0d1320; border: 1px solid #2d3a59; border-radius: 12px; padding: 10px; margin-bottom: 8px; }
+      .card-pill.deal { animation: dealIn .45s ease; transform-origin: center; }
+      @keyframes dealIn {
+        0% { transform: translateY(-14px) scale(.78); opacity: 0; }
+        100% { transform: translateY(0) scale(1); opacity: 1; }
+      }
+
+      .table-ring {
+        position: relative;
+        margin-top: 12px;
+        min-height: 560px;
+        border-radius: 24px;
+        border: 1px solid #2d3a59;
+        background: radial-gradient(circle at center, rgba(31,107,63,.25), rgba(10,20,30,.1));
+      }
+      .ring-center {
+        position: absolute;
+        top: 50%; left: 50%;
+        transform: translate(-50%, -50%);
+        width: 56%;
+        max-width: 420px;
+      }
+      .seat { background: #0d1320; border: 1px solid #2d3a59; border-radius: 12px; padding: 10px; position: absolute; width: 180px; transition: transform .2s ease, opacity .25s ease, filter .25s ease; }
+      .seat.folded { opacity: .45; filter: grayscale(.6); transform: scale(.97) rotate(-1deg); }
+      .seat.pos-0 { top: 8px; left: 50%; transform: translateX(-50%); }
+      .seat.pos-1 { top: 56px; right: 10px; }
+      .seat.pos-2 { top: 50%; right: 8px; transform: translateY(-50%); }
+      .seat.pos-3 { bottom: 56px; right: 10px; }
+      .seat.pos-4 { bottom: 8px; left: 50%; transform: translateX(-50%); }
+      .seat.pos-5 { bottom: 56px; left: 10px; }
+      .seat.pos-6 { top: 50%; left: 8px; transform: translateY(-50%); }
+      .seat.pos-7 { top: 56px; left: 10px; }
       .seat.turn {
         border: 2px solid #ffd84d;
         box-shadow: 0 0 0 2px rgba(255,216,77,0.25) inset, 0 0 18px rgba(255,216,77,0.35);
@@ -42,6 +72,9 @@
         .row { gap: 8px; }
         input, button { width: 100%; box-sizing: border-box; }
         .action-bar { position: sticky; bottom: 0; background: #10192a; padding: 8px; border:1px solid #2d3a59; border-radius: 10px; }
+        .table-ring { min-height: auto; display: grid; gap: 8px; padding: 8px; }
+        .ring-center { position: static; transform: none; width: 100%; max-width: none; order: 1; }
+        .seat { position: static; width: auto; transform: none !important; order: 2; }
       }
     </style>
   </head>
@@ -98,8 +131,20 @@
       </section>
 
       <section>
-        <h2>Seats</h2>
-        <div id="seats"></div>
+        <h2>Table Seats</h2>
+        <div class="table-ring">
+          <div class="ring-center">
+            <div class="table-shell">
+              <div class="chips">
+                <span class="chip" id="potChip2">Pot: 0</span>
+                <span class="chip" id="streetChip2">Street: waiting</span>
+              </div>
+              <p style="margin:8px 0 4px"><strong>Board</strong></p>
+              <div class="board" id="board2"></div>
+            </div>
+          </div>
+          <div id="seats"></div>
+        </div>
       </section>
 
       <section>
@@ -164,10 +209,11 @@
         const isRed = p.includes('♦️') || p.includes('♥️')
         return `<span class="card-pill ${isRed ? 'red' : ''}">${p}</span>`
       }
-      const cardsHtml = (cards, faceDown = false, count = 2) => {
-        if (faceDown) return Array.from({ length: count }).map(() => '<span class="card-pill">🂠</span>').join(' ')
+      const cardsHtml = (cards, faceDown = false, count = 2, dealing = false) => {
+        if (faceDown) return Array.from({ length: count }).map(() => `<span class="card-pill ${dealing ? 'deal' : ''}">🂠</span>`).join(' ')
         if (!cards || !cards.length) return '<span class="muted">-</span>'
-        return cards.map(cardHtml).join(' ')
+        const dealClass = dealing ? ' deal' : ''
+        return cards.map(c => cardHtml(c).replace('card-pill', `card-pill${dealClass}`)).join(' ')
       }
 
       const nextSeat = (from, seats) => {
@@ -218,11 +264,16 @@
         $('whoami').textContent = me ? `Joined as ${me.username} (seat ${me.seat_no})` : `Not joined (session ${sessionId.slice(0,8)}...)`
         const street = hand.street || 'waiting'
         const pot = hand.pot || currentGame.pot || 0
+        const dealingNow = hand.startedAt && (Date.now() - new Date(hand.startedAt).getTime() < 2200)
+
         $('stateLine').textContent = `Hand #${currentGame.hand_no || 0}`
         $('potChip').textContent = `Pot: ${pot}`
         $('streetChip').textContent = `Street: ${street}`
+        $('potChip2').textContent = `Pot: ${pot}`
+        $('streetChip2').textContent = `Street: ${street}`
         $('board').innerHTML = cardsHtml(hand.boardCards)
-        $('myHand').innerHTML = meHp?.holeCards?.length ? cardsHtml(meHp.holeCards) : '<span class="muted">No cards (join + start hand)</span>'
+        $('board2').innerHTML = cardsHtml(hand.boardCards)
+        $('myHand').innerHTML = meHp?.holeCards?.length ? cardsHtml(meHp.holeCards, false, 2, dealingNow) : '<span class="muted">No cards (join + start hand)</span>'
 
         const toCall = meHp ? Math.max(0, (hand.currentBet || 0) - (meHp.currentBet || 0)) : 0
         $('toCall').textContent = `To call: ${toCall}`
@@ -236,16 +287,19 @@
         $('raiseBtn').disabled = !myTurn
         $('allinBtn').disabled = !myTurn
 
-        $('seats').innerHTML = currentPlayers
+        const ringPlayers = currentPlayers
           .filter(p => p.seat_no != null)
           .sort((a,b)=>a.seat_no-b.seat_no)
-          .map(p => {
+
+        $('seats').innerHTML = ringPlayers
+          .map((p, idx) => {
             const hp = hand.playersBySession?.[p.session_id]
             const isTurn = hand.actingSessionId && hand.actingSessionId === p.session_id
+            const isFolded = !!hp?.folded
             const holeHtml = (p.session_id === sessionId || hand.street === 'waiting')
-              ? cardsHtml(hp?.holeCards || [])
-              : cardsHtml([], true, 2)
-            return `<div class="seat ${isTurn ? 'turn' : ''}"><strong>Seat ${p.seat_no}: ${p.username}</strong>${isTurn ? '<span class="turn-badge">◀ TURN</span>' : ''}<br/>Stack: ${hp?.stack ?? p.stack} • Hole: ${holeHtml} • Bet: ${hp?.currentBet ?? 0} • Last: ${hp?.lastAction || '-'}</div>`
+              ? cardsHtml(hp?.holeCards || [], false, 2, dealingNow)
+              : cardsHtml([], true, 2, dealingNow)
+            return `<div class="seat pos-${idx % 8} ${isTurn ? 'turn' : ''} ${isFolded ? 'folded' : ''}"><strong>Seat ${p.seat_no}: ${p.username}</strong>${isTurn ? '<span class="turn-badge">◀ TURN</span>' : ''}<br/>Stack: ${hp?.stack ?? p.stack} • Hole: ${holeHtml} • Bet: ${hp?.currentBet ?? 0} • Last: ${hp?.lastAction || '-'}</div>`
           }).join('')
 
         const log = hand.actionLog || []
@@ -337,6 +391,7 @@
 
         const hand_state = {
           street: 'preflop',
+          startedAt: new Date().toISOString(),
           boardCards: [],
           deck,
           pot,
