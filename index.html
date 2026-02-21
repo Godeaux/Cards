@@ -361,7 +361,8 @@
 
       async function finalize(state) {
         const live = Object.values(state.playersBySession).filter(p=>!p.folded)
-        if (live.length === 1) {
+        const uncontested = live.length === 1
+        if (uncontested) {
           live[0].stack += state.pot
           state.winnerSummary = `${live[0].username} wins ${state.pot} (uncontested)`
           state.actionLog.push(state.winnerSummary)
@@ -389,6 +390,17 @@
         state.street = 'waiting'
         state.actingSessionId = null
         await saveHand(state)
+
+        // Auto-start next hand after uncontested win (everyone else folded)
+        if (uncontested) {
+          setTimeout(async () => {
+            try {
+              await startHand()
+            } catch (_) {
+              // no-op
+            }
+          }, 1000)
+        }
       }
 
       async function act(type) {
