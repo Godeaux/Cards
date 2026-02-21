@@ -11,10 +11,10 @@
         max-width: 1100px;
         margin: 0 auto;
         height: 100vh;
-        padding: 8px;
+        padding: 6px;
         box-sizing: border-box;
         display: grid;
-        grid-template-rows: auto 1fr auto;
+        grid-template-rows: 1fr auto;
         gap: 6px;
         overflow: hidden;
       }
@@ -67,13 +67,22 @@
         left: 50%;
         top: 50%;
         transform: translate(-50%, -50%);
-        width: min(60%, 420px);
+        width: min(64%, 400px);
         z-index: 2;
         text-align: center;
       }
       .ring-center .table-shell { padding: 8px 10px; }
       .ring-center .chips { justify-content: center; flex-wrap: wrap; gap: 4px; margin-bottom: 5px; }
       .ring-center .board { justify-content: center; }
+      .ring-center .wait-msg { color: #6a8fa8; font-size: .82rem; padding: 4px 0; }
+      .start-round-btn {
+        width: 100%; padding: 11px 0; font-size: 1rem; font-weight: 700;
+        background: #1a3a24; border: 1.5px solid #2e6640; color: #6de87a;
+        border-radius: 14px; cursor: pointer; letter-spacing: .02em;
+        box-shadow: 0 0 16px rgba(80,200,100,.18);
+        transition: background .18s, box-shadow .18s;
+      }
+      .start-round-btn:hover { background: #1f4a2c; box-shadow: 0 0 24px rgba(80,200,100,.32); }
       /* Seat cards — compact, absolutely positioned around the oval */
       .seat { background: #0d1320; border: 1.5px solid #2a3a5a; border-radius: 10px; padding: 6px 7px; position: absolute; width: 92px; font-size: .72rem; transition: border-color .2s ease, box-shadow .2s ease, opacity .25s ease, filter .25s ease; box-sizing: border-box; }
 .seat-head { display:flex; align-items:center; gap:3px; flex-wrap:wrap; margin-bottom:3px; }
@@ -125,10 +134,8 @@
       .turn-badge { color: #ffdf66; font-weight: 700; margin-left: 8px; }
       .muted { color: #a6b0c2; }
       button:disabled { opacity: 0.45; cursor: not-allowed; }
-      .top-bar { grid-row: 1; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 4px 2px; }
-      .top-bar button { padding: 6px 12px; font-size: .8rem; }
-      .main-table { grid-row: 2; display: flex; flex-direction: column; min-height: 0; }
-      .bottom-actions { grid-row: 3; }
+      .main-table { grid-row: 1; display: flex; flex-direction: column; min-height: 0; }
+      .bottom-actions { grid-row: 2; }
 
       /* ── Floating join button ── */
       .join-float { position: fixed; top: 8px; right: 8px; z-index: 200; }
@@ -161,8 +168,6 @@
       @media (max-width: 520px) {
         .app { padding: 4px; gap: 4px; }
         h2 { font-size: .85rem; margin-bottom: 3px; }
-        .top-bar { gap: 4px; }
-        .top-bar button { padding: 5px 8px; font-size: .76rem; }
         section { padding: 5px; border-radius: 8px; }
         .row { gap: 4px; }
         input, button { box-sizing: border-box; padding: 6px 7px; font-size: .8rem; }
@@ -186,29 +191,11 @@
   </head>
   <body>
     <main class="app">
-      <div id="error" class="error" style="display:none"></div>
-
-      <!-- Compact top bar: controls only -->
-      <div class="top-bar">
-        <button id="startBtn">▶️ Start</button>
-        <button id="flushBtn">🧹 Flush</button>
-        <strong id="stateLine"></strong>
-        <span class="chip muted" id="playersChip" style="margin-left:auto">Players: 0</span>
-      </div>
-
-      <!-- Table Seats — fills middle, game info lives inside the oval -->
+      <!-- Table Seats — fills all vertical space, game info rendered inside oval by JS -->
       <section class="main-table">
         <div class="table-ring">
-          <div class="ring-center">
-            <div class="table-shell">
-              <div class="chips">
-                <span class="chip" id="potChip">Pot: 0</span>
-                <span class="chip" id="streetChip">Street: waiting</span>
-                <span class="chip" id="dealerChip">D: -</span>
-                <span class="chip" id="betChip">Bet: 0</span>
-              </div>
-              <div class="board" id="board"></div>
-            </div>
+          <div class="ring-center" id="ringCenter">
+            <!-- populated by render() -->
           </div>
           <div id="seats"></div>
         </div>
@@ -217,6 +204,7 @@
 
       <!-- Your Hand & Actions -->
       <section class="bottom-actions">
+        <div id="error" class="error" style="display:none"></div>
         <h2>Your Hand <span class="muted" id="actionState" style="font-weight:400; font-size:.82rem">— waiting</span></h2>
         <div class="board" id="myHand"></div>
         <div class="row" style="margin-top:4px">
@@ -371,15 +359,26 @@
         const street = hand.street || 'waiting'
         const pot = hand.pot || currentGame.pot || 0
         const dealingNow = hand.startedAt && (Date.now() - new Date(hand.startedAt).getTime() < 2200)
+        const seatedCount = currentPlayers.filter(p => p.seat_no != null).length
+        const isWaiting = street === 'waiting' || !hand.street
 
-        const acting = currentPlayers.find(p => p.session_id === hand.actingSessionId)
-        $('stateLine').textContent = `Hand #${currentGame.hand_no || 0}`
-        $('potChip').textContent = `Pot: ${pot}`
-        $('streetChip').textContent = `${street}`
-        $('dealerChip').textContent = `D: ${hand.dealerSeat ?? '-'}`
-        $('playersChip').textContent = `Players: ${currentPlayers.filter(p => p.seat_no != null).length}`
-        $('betChip').textContent = `Bet: ${hand.currentBet || 0}`
-        $('board').innerHTML = boardSlotsHtml(hand.boardCards || [], dealingNow)
+        // ── Render ring-center dynamically ──
+        const rc = $('ringCenter')
+        if (isWaiting && seatedCount >= 2) {
+          rc.innerHTML = `<button class="start-round-btn" id="startRoundBtn">▶ Start Round</button>`
+          $('startRoundBtn').onclick = startHand
+        } else if (isWaiting) {
+          rc.innerHTML = `<div class="wait-msg">Waiting for players…<br><span style="font-size:.7rem;opacity:.6">${seatedCount}/2 joined</span></div>`
+        } else {
+          rc.innerHTML = `<div class="table-shell">
+            <div class="chips">
+              ${pot > 0 ? `<span class="chip">Pot: ${pot}</span>` : ''}
+              <span class="chip">${street}</span>
+              ${hand.currentBet ? `<span class="chip">Bet: ${hand.currentBet}</span>` : ''}
+            </div>
+            <div class="board" style="justify-content:center">${boardSlotsHtml(hand.boardCards || [], dealingNow)}</div>
+          </div>`
+        }
         $('myHand').innerHTML = meHp?.holeCards?.length ? cardsHtml(meHp.holeCards, false, 2, dealingNow) : '<span class="muted">No cards (join + start hand)</span>'
 
         const toCall = meHp ? Math.max(0, (hand.currentBet || 0) - (meHp.currentBet || 0)) : 0
@@ -738,8 +737,6 @@
       $('joinBtn').onclick = join
       $('leaveBtn').onclick = leave
       $('refreshBtn').onclick = refresh
-      $('startBtn').onclick = startHand
-      $('flushBtn').onclick = flushTable
       $('clearLobbyBtn').onclick = clearEntireLobby
       $('foldBtn').onclick = () => act('fold')
       $('checkBtn').onclick = () => act('check')
