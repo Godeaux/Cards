@@ -11,10 +11,10 @@
         max-width: 1100px;
         margin: 0 auto;
         height: 100vh;
-        padding: 8px;
+        padding: 44px 8px 8px;
         box-sizing: border-box;
         display: grid;
-        grid-template-rows: auto auto 1fr auto;
+        grid-template-rows: auto 1fr auto;
         gap: 8px;
         overflow: hidden;
       }
@@ -121,10 +121,30 @@
       .turn-badge { color: #ffdf66; font-weight: 700; margin-left: 8px; }
       .muted { color: #a6b0c2; }
       button:disabled { opacity: 0.45; cursor: not-allowed; }
-      .top-join { grid-row: 1; }
-      .top-game { grid-row: 2; }
-      .main-table { grid-row: 3; display: flex; flex-direction: column; min-height: 0; }
-      .bottom-actions { grid-row: 4; }
+      .top-game { grid-row: 1; }
+      .main-table { grid-row: 2; display: flex; flex-direction: column; min-height: 0; }
+      .bottom-actions { grid-row: 3; }
+
+      /* ── Floating join button ── */
+      .join-float { position: fixed; top: 8px; right: 8px; z-index: 200; }
+      .join-toggle {
+        background: #1a3a24; border: 1px solid #2e6640; color: #6de87a;
+        border-radius: 20px; padding: 7px 14px; font-size: .8rem; font-weight: 700;
+        cursor: pointer; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,.4);
+      }
+      .join-toggle:hover { background: #1f4a2c; }
+      .join-toggle.is-joined { background: #12233a; border-color: #2d5080; color: #7ac2e8; }
+      .join-drop {
+        position: absolute; top: calc(100% + 6px); right: 0;
+        background: #141c2d; border: 1px solid #25304a; border-radius: 12px;
+        padding: 10px; min-width: 264px;
+        box-shadow: 0 8px 28px rgba(0,0,0,.55); z-index: 201;
+      }
+      .join-drop .row { gap: 6px; }
+      .join-drop input { flex: 1; min-width: 0; }
+      .join-drop .row-2 { display: flex; gap: 6px; margin-top: 6px; }
+      .join-drop .row-2 button { flex: 1; }
+      .join-whoami { color: #a6b0c2; font-size: .72rem; margin: 6px 0 0; }
       .action-bar { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
       .action-row { display:grid; gap:6px; }
       .action-row.top { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -134,13 +154,15 @@
       .chips { display:inline-flex; gap:8px; align-items:center; }
       .chip { background:#1b2740; border:1px solid #3d547f; border-radius:999px; padding:4px 10px; font-size:0.9rem; }
       @media (max-width: 520px) {
-        .app { padding: 4px; gap: 4px; }
+        .app { padding: 40px 4px 4px; gap: 4px; }
         h1, .app > p.muted { display: none; }
         h2 { font-size: .9rem; margin-bottom: 4px; }
         section { padding: 6px; border-radius: 8px; }
         .row { gap: 4px; }
         input, button { box-sizing: border-box; padding: 6px 7px; font-size: .8rem; }
-        .top-join .row button, .top-game .row button { padding: 5px 7px; }
+        .top-game .row button { padding: 5px 7px; }
+        .join-drop { min-width: 220px; }
+        .join-drop input, .join-drop button { padding: 6px 8px; font-size: .78rem; }
         .chips { gap: 4px; }
         .chip { padding: 2px 7px; font-size: .72rem; }
         .card-pill { min-width: 30px; height: 36px; font-size: .85rem; }
@@ -161,18 +183,6 @@
       <h1>Cards — Static HTML MVP</h1>
       <p class="muted">Direct GitHub Pages app with full playable hand loop.</p>
       <div id="error" class="error" style="display:none"></div>
-
-      <section class="top-join">
-        <h2>Join</h2>
-        <div class="row">
-          <input id="username" placeholder="username" maxlength="20" />
-          <button id="joinBtn">Join</button>
-          <button id="leaveBtn">Leave</button>
-          <button id="refreshBtn">Refresh</button>
-          <button id="clearLobbyBtn">Clear Lobby</button>
-        </div>
-        <p id="whoami" class="muted"></p>
-      </section>
 
       <section class="top-game">
         <h2>Game Table</h2>
@@ -234,6 +244,23 @@
 
       <div class="muted" id="log" style="font-size:.82rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">No actions yet.</div>
     </main>
+
+    <!-- Floating join panel -->
+    <div class="join-float" id="joinFloat">
+      <button class="join-toggle" id="joinToggle">＋ Join</button>
+      <div class="join-drop" id="joinDrop" hidden>
+        <div class="row">
+          <input id="username" placeholder="username" maxlength="20" />
+          <button id="joinBtn">Join</button>
+          <button id="leaveBtn">Leave</button>
+        </div>
+        <div class="row-2">
+          <button id="refreshBtn">Refresh</button>
+          <button id="clearLobbyBtn">Clear Lobby</button>
+        </div>
+        <p class="join-whoami" id="whoami"></p>
+      </div>
+    </div>
 
     <script type="module">
       import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -343,6 +370,11 @@
         const meHp = getMyHandPlayer()
 
         $('whoami').textContent = me ? `Joined as ${me.username} (seat ${me.seat_no})` : `Not joined (session ${sessionId.slice(0,8)}...)`
+        const jt = document.getElementById('joinToggle')
+        if (jt) {
+          jt.textContent = me ? `${me.username} ▾` : '＋ Join'
+          jt.className = me ? 'join-toggle is-joined' : 'join-toggle'
+        }
         const street = hand.street || 'waiting'
         const pot = hand.pot || currentGame.pot || 0
         const dealingNow = hand.startedAt && (Date.now() - new Date(hand.startedAt).getTime() < 2200)
@@ -442,6 +474,7 @@
           heartbeat_at: new Date().toISOString(),
         }, { onConflict: 'session_id' })
         if (error) return showError(error.message)
+        document.getElementById('joinDrop').hidden = true
         refresh()
       }
 
@@ -724,6 +757,18 @@
       $('callBtn').onclick = () => act('call')
       $('raiseBtn').onclick = () => act('raise')
       $('allinBtn').onclick = () => act('allin')
+
+      // Floating join panel toggle
+      const joinFloat = document.getElementById('joinFloat')
+      const joinDrop  = document.getElementById('joinDrop')
+      const joinToggle = document.getElementById('joinToggle')
+      joinToggle.addEventListener('click', (e) => {
+        e.stopPropagation()
+        joinDrop.hidden = !joinDrop.hidden
+      })
+      document.addEventListener('click', (e) => {
+        if (!joinFloat.contains(e.target)) joinDrop.hidden = true
+      })
 
       const channel = supabase
         .channel('cards-static-realtime')
