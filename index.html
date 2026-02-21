@@ -117,6 +117,15 @@
         return a
       }
       const mkDeck = () => shuffle('23456789TJQKA'.split('').flatMap(r => 'CDHS'.split('').map(s => r+s)))
+      const SUIT_EMOJI = { C: '♣️', D: '♦️', H: '♥️', S: '♠️' }
+      const prettyCard = (c) => {
+        if (!c || typeof c !== 'string' || c.length < 2) return c || '-'
+        const rank = c[0]
+        const suit = c[1].toUpperCase()
+        return `${rank}${SUIT_EMOJI[suit] || suit}`
+      }
+      const prettyCards = (cards) => (cards || []).map(prettyCard).join(' ')
+
       const nextSeat = (from, seats) => {
         const sorted = [...seats].sort((a,b)=>a-b)
         for (const s of sorted) if (s > from) return s
@@ -164,8 +173,8 @@
 
         $('whoami').textContent = me ? `Joined as ${me.username} (seat ${me.seat_no})` : `Not joined (session ${sessionId.slice(0,8)}...)`
         $('stateLine').textContent = `Hand #${currentGame.hand_no || 0} • Street: ${hand.street || 'waiting'} • Pot: ${hand.pot || currentGame.pot || 0}`
-        $('board').textContent = (hand.boardCards || []).join(' ') || '-'
-        $('myHand').textContent = meHp?.holeCards?.join(' ') || 'No cards (join + start hand)'
+        $('board').textContent = prettyCards(hand.boardCards) || '-'
+        $('myHand').textContent = meHp?.holeCards?.length ? prettyCards(meHp.holeCards) : 'No cards (join + start hand)'
 
         const toCall = meHp ? Math.max(0, (hand.currentBet || 0) - (meHp.currentBet || 0)) : 0
         $('toCall').textContent = `To call: ${toCall}`
@@ -184,7 +193,7 @@
           .map(p => {
             const hp = hand.playersBySession?.[p.session_id]
             const isTurn = hand.actingSessionId && hand.actingSessionId === p.session_id
-            const hole = p.session_id === sessionId || hand.street === 'waiting' ? (hp?.holeCards?.join(' ') || '-') : '🂠 🂠'
+            const hole = p.session_id === sessionId || hand.street === 'waiting' ? (hp?.holeCards?.length ? prettyCards(hp.holeCards) : '-') : '🂠 🂠'
             return `<div class="seat ${isTurn ? 'turn' : ''}"><strong>Seat ${p.seat_no}: ${p.username}</strong>${isTurn ? '<span class="turn-badge">◀ TURN</span>' : ''}<br/>Stack: ${hp?.stack ?? p.stack} • Hole: ${hole} • Bet: ${hp?.currentBet ?? 0} • Last: ${hp?.lastAction || '-'}</div>`
           }).join('')
 
@@ -319,15 +328,15 @@
         if (state.street === 'preflop') {
           state.street = 'flop'
           state.boardCards.push(state.deck.pop(), state.deck.pop(), state.deck.pop())
-          state.actionLog.push(`Flop: ${state.boardCards.join(' ')}`)
+          state.actionLog.push(`Flop: ${prettyCards(state.boardCards)}`)
         } else if (state.street === 'flop') {
           state.street = 'turn'
           state.boardCards.push(state.deck.pop())
-          state.actionLog.push(`Turn: ${state.boardCards.join(' ')}`)
+          state.actionLog.push(`Turn: ${prettyCards(state.boardCards)}`)
         } else if (state.street === 'turn') {
           state.street = 'river'
           state.boardCards.push(state.deck.pop())
-          state.actionLog.push(`River: ${state.boardCards.join(' ')}`)
+          state.actionLog.push(`River: ${prettyCards(state.boardCards)}`)
         } else {
           state.street = 'showdown'
           state.actionLog.push('Showdown')
