@@ -22,7 +22,7 @@
   <body>
     <main class="app">
       <h1>Cards — Static HTML MVP</h1>
-      <p class="muted">No build step. Direct GitHub Pages static app.</p>
+      <p class="muted">Direct GitHub Pages app with full playable hand loop.</p>
       <div id="error" class="error" style="display:none"></div>
 
       <section>
@@ -47,13 +47,30 @@
       </section>
 
       <section>
-        <h2>Your Hand</h2>
+        <h2>Your Hand & Actions</h2>
         <p id="myHand">-</p>
+        <div class="row">
+          <span id="toCall">To call: 0</span>
+          <span id="myStack">Stack: -</span>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button id="foldBtn">Fold</button>
+          <button id="checkBtn">Check</button>
+          <button id="callBtn">Call</button>
+          <input id="raiseTo" type="number" placeholder="Raise to" style="width:110px" />
+          <button id="raiseBtn">Raise To</button>
+          <button id="allinBtn">All-in</button>
+        </div>
       </section>
 
       <section>
         <h2>Seats</h2>
         <div id="seats"></div>
+      </section>
+
+      <section>
+        <h2>Hand Log</h2>
+        <ul id="log"></ul>
       </section>
 
       <section>
@@ -66,10 +83,12 @@
 
     <script type="module">
       import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+      import PokerHand from 'https://esm.sh/poker-hand-evaluator@1.0.1'
 
-      // Static public config (anon key)
       const SUPABASE_URL = 'https://oiltjegxfwjdvuzbsyfv.supabase.co'
       const SUPABASE_ANON_KEY = 'sb_publishable_7rNCoUWbz3FnDY4VdIvCbg_9R-LuirL'
+      const SB = 1
+      const BB = 2
 
       const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
       const sessionKey = 'cards_session_id'
@@ -78,6 +97,10 @@
         sessionId = crypto.randomUUID()
         localStorage.setItem(sessionKey, sessionId)
       }
+
+      let currentPlayers = []
+      let currentGame = {}
+      let currentHand = {}
 
       const $ = (id) => document.getElementById(id)
       const showError = (msg) => {
@@ -93,8 +116,81 @@
         }
         return a
       }
-
       const mkDeck = () => shuffle('23456789TJQKA'.split('').flatMap(r => 'CDHS'.split('').map(s => r+s)))
+      const nextSeat = (from, seats) => {
+        const sorted = [...seats].sort((a,b)=>a-b)
+        for (const s of sorted) if (s > from) return s
+        return sorted[0]
+      }
+
+      const combos = (arr, k) => {
+        const out = []
+        const pick = (start, acc) => {
+          if (acc.length === k) return out.push(acc)
+          for (let i = start; i < arr.length; i++) pick(i + 1, [...acc, arr[i]])
+        }
+        pick(0, [])
+        return out
+      }
+
+      const bestScore7 = (cards7) => {
+        let best = Infinity
+        for (const c of combos(cards7, 5)) {
+          const h = new PokerHand(c.join(' '))
+          best = Math.min(best, h.getScore())
+        }
+        return best
+      }
+
+      const getMe = () => currentPlayers.find(p => p.session_id === sessionId)
+      const getMyHandPlayer = () => currentHand.playersBySession?.[sessionId]
+
+      async function saveHand(state) {
+        const { error } = await supabase.from('game_state').update({
+          phase: state.street || 'waiting',
+          current_turn_session_id: state.actingSessionId || null,
+          pot: state.pot || 0,
+          hand_state: state,
+          updated_at: new Date().toISOString(),
+          last_action_at: new Date().toISOString(),
+        }).eq('id', 1)
+        if (error) throw error
+      }
+
+      function render() {
+        const me = getMe()
+        const hand = currentHand || {}
+        const meHp = getMyHandPlayer()
+
+        $('whoami').textContent = me ? `Joined as ${me.username} (seat ${me.seat_no})` : `Not joined (session ${sessionId.slice(0,8)}...)`
+        $('stateLine').textContent = `Hand #${currentGame.hand_no || 0} • Street: ${hand.street || 'waiting'} • Pot: ${hand.pot || currentGame.pot || 0}`
+        $('board').textContent = (hand.boardCards || []).join(' ') || '-'
+        $('myHand').textContent = meHp?.holeCards?.join(' ') || 'No cards (join + start hand)'
+
+        const toCall = meHp ? Math.max(0, (hand.currentBet || 0) - (meHp.currentBet || 0)) : 0
+        $('toCall').textContent = `To call: ${toCall}`
+        $('myStack').textContent = `Stack: ${meHp?.stack ?? me?.stack ?? '-'}`
+
+        const myTurn = hand.actingSessionId && hand.actingSessionId === sessionId
+        $('foldBtn').disabled = !myTurn
+        $('checkBtn').disabled = !myTurn || toCall > 0
+        $('callBtn').disabled = !myTurn || toCall === 0
+        $('raiseBtn').disabled = !myTurn
+        $('allinBtn').disabled = !myTurn
+
+        $('seats').innerHTML = currentPlayers
+          .filter(p => p.seat_no != null)
+          .sort((a,b)=>a.seat_no-b.seat_no)
+          .map(p => {
+            const hp = hand.playersBySession?.[p.session_id]
+            const isTurn = hand.actingSessionId && hand.actingSessionId === p.session_id
+            const hole = p.session_id === sessionId || hand.street === 'waiting' ? (hp?.holeCards?.join(' ') || '-') : '🂠 🂠'
+            return `<div class="seat ${isTurn ? 'turn' : ''}"><strong>Seat ${p.seat_no}: ${p.username}</strong>${isTurn ? '<span class="turn-badge">◀ TURN</span>' : ''}<br/>Stack: ${hp?.stack ?? p.stack} • Hole: ${hole} • Bet: ${hp?.currentBet ?? 0} • Last: ${hp?.lastAction || '-'}</div>`
+          }).join('')
+
+        const log = hand.actionLog || []
+        $('log').innerHTML = log.length ? log.slice(-16).map(x => `<li>${x}</li>`).join('') : '<li class="muted">No actions yet.</li>'
+      }
 
       async function refresh() {
         showError('')
@@ -105,27 +201,10 @@
         if (pRes.error) return showError(pRes.error.message)
         if (gRes.error) return showError(gRes.error.message)
 
-        const players = pRes.data || []
-        const game = gRes.data || {}
-        const hand = game.hand_state || {}
-        const me = players.find(p => p.session_id === sessionId)
-
-        $('whoami').textContent = me ? `Joined as ${me.username} (seat ${me.seat_no})` : `Not joined (session ${sessionId.slice(0,8)}...)`
-        $('stateLine').textContent = `Hand #${game.hand_no || 0} • Street: ${hand.street || 'waiting'} • Pot: ${hand.pot || game.pot || 0}`
-        $('board').textContent = (hand.boardCards || []).join(' ') || '-'
-
-        const myHand = hand.playersBySession?.[sessionId]?.holeCards || []
-        $('myHand').textContent = myHand.length ? myHand.join(' ') : 'No cards (join + start hand)'
-
-        $('seats').innerHTML = players
-          .filter(p => p.seat_no != null)
-          .sort((a,b)=>a.seat_no-b.seat_no)
-          .map(p => {
-            const hp = hand.playersBySession?.[p.session_id]
-            const hole = p.session_id === sessionId ? (hp?.holeCards?.join(' ') || '-') : '🂠 🂠'
-            const isTurn = hand.actingSessionId && hand.actingSessionId === p.session_id
-            return `<div class="seat ${isTurn ? 'turn' : ''}"><strong>Seat ${p.seat_no}: ${p.username}</strong>${isTurn ? '<span class="turn-badge">◀ YOUR TURN</span>' : ''}<br/>Stack: ${hp?.stack ?? p.stack} • Hole: ${hole} • Last: ${hp?.lastAction || '-'}</div>`
-          }).join('')
+        currentPlayers = pRes.data || []
+        currentGame = gRes.data || {}
+        currentHand = currentGame.hand_state || {}
+        render()
       }
 
       async function join() {
@@ -153,9 +232,16 @@
       }
 
       async function startHand() {
-        const { data: players } = await supabase.from('lobby_players').select('*').order('seat_no', { ascending: true })
-        const seated = (players || []).filter(p => p.seat_no != null)
+        await refresh()
+        const seated = currentPlayers.filter(p => p.seat_no != null).sort((a,b)=>a.seat_no-b.seat_no)
         if (seated.length < 2) return showError('Need at least 2 players')
+
+        const prevDealer = currentGame.dealer_seat || seated[0].seat_no
+        const seats = seated.map(p=>p.seat_no)
+        const dealerSeat = currentGame.dealer_seat ? nextSeat(prevDealer, seats) : seated[0].seat_no
+        const sbSeat = nextSeat(dealerSeat, seats)
+        const bbSeat = nextSeat(sbSeat, seats)
+        const utgSeat = nextSeat(bbSeat, seats)
 
         const deck = mkDeck()
         const playersBySession = {}
@@ -166,63 +252,216 @@
             seat_no: p.seat_no,
             stack: p.stack,
             holeCards: [deck.pop(), deck.pop()],
+            folded: false,
+            allIn: false,
+            currentBet: 0,
+            totalCommitted: 0,
+            actedStreet: false,
             lastAction: 'dealt',
           }
         }
+
+        const postBlind = (seat, amt, label) => {
+          const pl = Object.values(playersBySession).find(x=>x.seat_no===seat)
+          const paid = Math.min(pl.stack, amt)
+          pl.stack -= paid
+          pl.currentBet += paid
+          pl.totalCommitted += paid
+          pl.lastAction = label
+          if (pl.stack === 0) pl.allIn = true
+          return paid
+        }
+
+        const pot = postBlind(sbSeat, SB, 'small blind') + postBlind(bbSeat, BB, 'big blind')
+        const actingSessionId = Object.values(playersBySession).find(x=>x.seat_no===utgSeat)?.session_id || null
 
         const hand_state = {
           street: 'preflop',
           boardCards: [],
           deck,
-          pot: 0,
+          pot,
+          currentBet: BB,
+          minRaise: BB,
+          dealerSeat,
+          actingSessionId,
           playersBySession,
-          actionLog: ['hand started'],
+          actionLog: [`Hand #${(currentGame.hand_no||0)+1} started`, `Blinds posted ${SB}/${BB}`],
+          winnerSummary: null,
         }
 
-        const { data: g } = await supabase.from('game_state').select('hand_no').eq('id',1).single()
-        const hand_no = (g?.hand_no || 0) + 1
-        const { error } = await supabase.from('game_state').update({ hand_no, phase: 'preflop', hand_state, updated_at: new Date().toISOString() }).eq('id', 1)
-        if (error) return showError(error.message)
-        refresh()
+        await supabase.from('game_state').update({ hand_no: (currentGame.hand_no||0)+1, dealer_seat: dealerSeat }).eq('id',1)
+        await saveHand(hand_state)
+        await refresh()
+      }
+
+      function nextActing(state, fromSession) {
+        const active = Object.values(state.playersBySession).filter(p => !p.folded && !p.allIn).sort((a,b)=>a.seat_no-b.seat_no)
+        if (!active.length) return null
+        const currentSeat = state.playersBySession[fromSession]?.seat_no || active[0].seat_no
+        const nSeat = nextSeat(currentSeat, active.map(p=>p.seat_no))
+        return active.find(p=>p.seat_no===nSeat)?.session_id || active[0].session_id
+      }
+
+      function streetResolved(state) {
+        const live = Object.values(state.playersBySession).filter(p => !p.folded)
+        if (live.length <= 1) return true
+        return live.every(p => p.allIn || (p.actedStreet && p.currentBet === state.currentBet))
+      }
+
+      function dealNextStreet(state) {
+        for (const p of Object.values(state.playersBySession)) {
+          p.currentBet = 0
+          p.actedStreet = false
+        }
+        state.currentBet = 0
+        state.minRaise = BB
+
+        if (state.street === 'preflop') {
+          state.street = 'flop'
+          state.boardCards.push(state.deck.pop(), state.deck.pop(), state.deck.pop())
+          state.actionLog.push(`Flop: ${state.boardCards.join(' ')}`)
+        } else if (state.street === 'flop') {
+          state.street = 'turn'
+          state.boardCards.push(state.deck.pop())
+          state.actionLog.push(`Turn: ${state.boardCards.join(' ')}`)
+        } else if (state.street === 'turn') {
+          state.street = 'river'
+          state.boardCards.push(state.deck.pop())
+          state.actionLog.push(`River: ${state.boardCards.join(' ')}`)
+        } else {
+          state.street = 'showdown'
+          state.actionLog.push('Showdown')
+        }
+
+        const active = Object.values(state.playersBySession).filter(p=>!p.folded && !p.allIn).sort((a,b)=>a.seat_no-b.seat_no)
+        if (!active.length) { state.actingSessionId = null; return }
+        const seat = nextSeat(state.dealerSeat, active.map(p=>p.seat_no))
+        state.actingSessionId = active.find(p=>p.seat_no===seat)?.session_id || null
+      }
+
+      async function finalize(state) {
+        const live = Object.values(state.playersBySession).filter(p=>!p.folded)
+        if (live.length === 1) {
+          live[0].stack += state.pot
+          state.winnerSummary = `${live[0].username} wins ${state.pot} (uncontested)`
+          state.actionLog.push(state.winnerSummary)
+        } else {
+          let winners = []
+          let best = Infinity
+          for (const p of live) {
+            const score = bestScore7([...p.holeCards, ...state.boardCards])
+            p.showScore = score
+            if (score < best) { best = score; winners = [p] }
+            else if (score === best) winners.push(p)
+          }
+          winners.sort((a,b)=>a.seat_no-b.seat_no)
+          const base = Math.floor(state.pot / winners.length)
+          let rem = state.pot % winners.length
+          for (const w of winners) w.stack += base + (rem-- > 0 ? 1 : 0)
+          state.winnerSummary = `Winners: ${winners.map(w=>w.username).join(', ')}`
+          state.actionLog.push(state.winnerSummary)
+        }
+
+        for (const p of Object.values(state.playersBySession)) {
+          await supabase.from('lobby_players').update({ stack: p.stack }).eq('session_id', p.session_id)
+        }
+
+        state.street = 'waiting'
+        state.actingSessionId = null
+        await saveHand(state)
+      }
+
+      async function act(type) {
+        await refresh()
+        const state = structuredClone(currentHand)
+        if (!state?.actingSessionId || state.actingSessionId !== sessionId) return
+        const me = state.playersBySession[sessionId]
+        if (!me || me.folded || me.allIn) return
+
+        const toCall = Math.max(0, state.currentBet - me.currentBet)
+        const commit = (n) => {
+          const paid = Math.min(n, me.stack)
+          me.stack -= paid
+          me.currentBet += paid
+          me.totalCommitted += paid
+          state.pot += paid
+          if (me.stack === 0) me.allIn = true
+          return paid
+        }
+
+        if (type === 'fold') {
+          me.folded = true
+          me.actedStreet = true
+          me.lastAction = 'fold'
+          state.actionLog.push(`${me.username}: fold`)
+        } else if (type === 'check') {
+          if (toCall > 0) return showError('Cannot check; call or fold')
+          me.actedStreet = true
+          me.lastAction = 'check'
+          state.actionLog.push(`${me.username}: check`)
+        } else if (type === 'call') {
+          commit(toCall)
+          me.actedStreet = true
+          me.lastAction = `call ${toCall}`
+          state.actionLog.push(`${me.username}: call ${toCall}`)
+        } else if (type === 'raise') {
+          const target = Number($('raiseTo').value || 0)
+          if (!(target > state.currentBet)) return showError('Raise-to must be greater than current bet')
+          commit(target - me.currentBet)
+          state.minRaise = Math.max(state.minRaise, target - state.currentBet)
+          state.currentBet = me.currentBet
+          me.actedStreet = true
+          me.lastAction = `raise to ${me.currentBet}`
+          state.actionLog.push(`${me.username}: raise to ${me.currentBet}`)
+          for (const p of Object.values(state.playersBySession)) if (p.session_id !== me.session_id && !p.folded && !p.allIn) p.actedStreet = false
+        } else if (type === 'allin') {
+          commit(me.stack)
+          if (me.currentBet > state.currentBet) {
+            state.minRaise = Math.max(state.minRaise, me.currentBet - state.currentBet)
+            state.currentBet = me.currentBet
+            for (const p of Object.values(state.playersBySession)) if (p.session_id !== me.session_id && !p.folded && !p.allIn) p.actedStreet = false
+          }
+          me.actedStreet = true
+          me.lastAction = 'all-in'
+          state.actionLog.push(`${me.username}: all-in (${me.currentBet})`)
+        }
+
+        const live = Object.values(state.playersBySession).filter(p => !p.folded)
+        if (live.length <= 1) {
+          await finalize(state)
+          return refresh()
+        }
+
+        if (streetResolved(state)) {
+          dealNextStreet(state)
+          if (state.street === 'showdown' || state.street === 'waiting') {
+            await finalize(state)
+            return refresh()
+          }
+        } else {
+          state.actingSessionId = nextActing(state, sessionId)
+        }
+
+        await saveHand(state)
+        await refresh()
       }
 
       async function flushTable() {
-        const { error } = await supabase
-          .from('game_state')
-          .update({
-            phase: 'waiting',
-            current_turn_session_id: null,
-            pot: 0,
-            hand_state: {},
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', 1)
+        const { error } = await supabase.from('game_state').update({
+          phase: 'waiting', current_turn_session_id: null, pot: 0, hand_state: {}, updated_at: new Date().toISOString(),
+        }).eq('id', 1)
         if (error) return showError(error.message)
         refresh()
       }
 
       async function clearEntireLobby() {
-        const ok = confirm('Clear entire lobby and reset table?')
-        if (!ok) return
-
+        if (!confirm('Clear entire lobby and reset table?')) return
         const del = await supabase.from('lobby_players').delete().neq('session_id', '')
         if (del.error) return showError(del.error.message)
-
-        const reset = await supabase
-          .from('game_state')
-          .update({
-            hand_no: 0,
-            phase: 'waiting',
-            dealer_seat: null,
-            current_turn_session_id: null,
-            pot: 0,
-            hand_state: {},
-            showdown_state: {},
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', 1)
+        const reset = await supabase.from('game_state').update({
+          hand_no: 0, phase: 'waiting', dealer_seat: null, current_turn_session_id: null, pot: 0, hand_state: {}, showdown_state: {}, updated_at: new Date().toISOString(),
+        }).eq('id', 1)
         if (reset.error) return showError(reset.error.message)
-
         refresh()
       }
 
@@ -232,6 +471,11 @@
       $('startBtn').onclick = startHand
       $('flushBtn').onclick = flushTable
       $('clearLobbyBtn').onclick = clearEntireLobby
+      $('foldBtn').onclick = () => act('fold')
+      $('checkBtn').onclick = () => act('check')
+      $('callBtn').onclick = () => act('call')
+      $('raiseBtn').onclick = () => act('raise')
+      $('allinBtn').onclick = () => act('allin')
 
       const channel = supabase
         .channel('cards-static-realtime')
