@@ -54,7 +54,11 @@
         width: 56%;
         max-width: 420px;
       }
-      .seat { background: #0d1320; border: 1px solid #2d3a59; border-radius: 12px; padding: 10px; position: absolute; width: 180px; transition: transform .2s ease, opacity .25s ease, filter .25s ease; }
+      .seat { background: #0d1320; border: 1px solid #2d3a59; border-radius: 12px; padding: 8px; position: absolute; width: 180px; transition: transform .2s ease, opacity .25s ease, filter .25s ease; }
+.seat-head { display:flex; align-items:center; gap:4px; flex-wrap:wrap; margin-bottom:4px; }
+.seat-head strong { font-size:.95rem; }
+.seat-meta { display:flex; gap:8px; flex-wrap:wrap; color:#c7d3ea; font-size:.78rem; margin-bottom:4px; }
+.seat-cards { display:flex; gap:4px; align-items:center; }
       .seat.folded { opacity: .45; filter: grayscale(.6); transform: scale(.97) rotate(-1deg); }
       .seat.pos-0 { top: 8px; left: 50%; transform: translateX(-50%); }
       .seat.pos-1 { top: 56px; right: 10px; }
@@ -124,7 +128,8 @@
         .table-ring { min-height: auto; display: grid; gap: 4px; padding: 4px; }
         .ring-center { position: static; transform: none; width: 100%; max-width: none; order: 1; }
         .seat { position: static; width: auto; transform: none !important; order: 2; padding: 6px; font-size: .72rem; }
-        .seat br { display:none; }
+        .seat-head strong { font-size: .82rem; }
+        .seat-meta { gap: 6px; font-size: .72rem; }
         .seat .card-pill { min-width: 24px; height: 28px; }
         #log { display: none; }
       }
@@ -360,7 +365,11 @@
             const dealerTag = hand.dealerSeat === p.seat_no ? '<span class="marker dealer">D</span>' : ''
             const sbTag = hand.sbSeat === p.seat_no ? '<span class="marker sb">SB</span>' : ''
             const bbTag = hand.bbSeat === p.seat_no ? '<span class="marker bb">BB</span>' : ''
-            return `<div class="seat pos-${idx % 8} ${isTurn ? 'turn' : ''} ${justTurned ? 'just-turned' : ''} ${isFolded ? 'folded' : ''}"><strong>Seat ${p.seat_no}: ${p.username}</strong>${dealerTag}${sbTag}${bbTag}${isTurn ? '<span class="turn-badge">◀ TURN</span>' : ''}<br/>Stack: ${hp?.stack ?? p.stack} • Hole: ${holeHtml} • Bet: ${hp?.currentBet ?? 0} • Last: ${hp?.lastAction || '-'}</div>`
+            return `<div class="seat pos-${idx % 8} ${isTurn ? 'turn' : ''} ${justTurned ? 'just-turned' : ''} ${isFolded ? 'folded' : ''}">
+              <div class="seat-head"><strong>${p.username}</strong><span class="muted">S${p.seat_no}</span>${dealerTag}${sbTag}${bbTag}${isTurn ? '<span class="turn-badge">◀ TURN</span>' : ''}</div>
+              <div class="seat-meta"><span>Stack ${hp?.stack ?? p.stack}</span><span>Bet ${hp?.currentBet ?? 0}</span><span>Last ${hp?.lastAction || '-'}</span></div>
+              <div class="seat-cards">${holeHtml}</div>
+            </div>`
           }).join('')
 
         const move = hand.lastChipMove
