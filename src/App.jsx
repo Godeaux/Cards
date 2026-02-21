@@ -10,6 +10,18 @@ const BLIND_OPTIONS = [
 ]
 const MAX_PLAYERS = 8
 
+// Clockwise: 3 top, 1 right, 3 bottom, 1 left
+const SEAT_POSITIONS = [
+  { top: '9%',  left: '22%' },  // 1 top-left
+  { top: '3%',  left: '50%' },  // 2 top-center
+  { top: '9%',  left: '78%' },  // 3 top-right
+  { top: '50%', left: '95%' },  // 4 right
+  { top: '89%', left: '78%' },  // 5 bottom-right
+  { top: '95%', left: '50%' },  // 6 bottom-center
+  { top: '89%', left: '22%' },  // 7 bottom-left
+  { top: '50%', left: '5%' },   // 8 left
+]
+
 function getSessionId() {
   const key = 'cards_session_id'
   let sid = localStorage.getItem(key)
@@ -520,25 +532,63 @@ function App() {
       </section>
 
       <section>
-        <h2>Table / Seats ({seatedPlayers.length}/8)</h2>
-        <div className="seat-grid">
-          {seatedPlayers.map((p) => {
-            const s = handPlayers[p.session_id]
-            const isTurn = hand.actingSessionId === p.session_id
+        <h2>Table / Seats ({seatedPlayers.length}/{MAX_PLAYERS})</h2>
+        <div className="table-area">
+          {/* Oval felt */}
+          <div className="poker-felt">
+            <div className="table-center-info">
+              <div className="table-street-bar">
+                <span>Pot: <strong>{hand.pot ?? 0}</strong></span>
+                <span>{hand.street || 'waiting'}</span>
+                {countdown != null && hand.street !== 'waiting' && <span>⏱ {countdown}s</span>}
+              </div>
+              {(hand.boardCards || []).length > 0 && (
+                <div className="board-cards">
+                  {(hand.boardCards || []).map((c, i) => (
+                    <span key={i} className="board-card">{c}</span>
+                  ))}
+                </div>
+              )}
+              {hand.winnerSummary && (
+                <div className="winner-banner">🏆 {hand.winnerSummary}</div>
+              )}
+            </div>
+          </div>
+
+          {/* Seat slots around the table */}
+          {Array.from({ length: MAX_PLAYERS }, (_, i) => {
+            const seatNo = i + 1
+            const player = seatedPlayers.find((p) => p.seat_no === seatNo)
+            const hp = player ? handPlayers[player.session_id] : null
+            const isTurn = !!(player && hand.actingSessionId === player.session_id)
+            const isDealer = hand.dealerSeat === seatNo
+            const isMe = player?.session_id === sessionId
+            const pos = SEAT_POSITIONS[i]
             return (
-              <div className="seat-card" key={p.session_id}>
-                <div className="seat-head">
-                  <strong>Seat {p.seat_no}: {p.username}</strong>
-                  <span>{isTurn ? '🎯 Acting' : '-'}</span>
-                </div>
-                <div className="seat-meta">
-                  <span>Stack: {s?.stack ?? p.stack}</span>
-                  <span>Hole: {p.session_id === sessionId || hand.street === 'waiting' ? (s?.holeCards?.join(' ') || '-') : '🂠 🂠'}</span>
-                  <span>Current Bet: {s?.currentBet ?? 0}</span>
-                  <span>Committed: {s?.totalCommitted ?? 0}</span>
-                  <span>Status: {s?.folded ? 'Folded' : s?.allIn ? 'All-in' : s?.pending ? 'Pending' : s?.checked ? 'Checked' : 'Active'}</span>
-                  <span>Last Action: {s?.lastAction || '-'}</span>
-                </div>
+              <div
+                key={seatNo}
+                className={`seat-slot${player ? ' occupied' : ' empty'}${isTurn ? ' acting' : ''}${hp?.folded ? ' folded' : ''}`}
+                style={{ top: pos.top, left: pos.left }}
+              >
+                {player ? (
+                  <>
+                    <div className="seat-name">
+                      {isDealer && <span className="dealer-chip">D</span>}
+                      <span className="seat-username">{player.username}{isMe ? ' ★' : ''}</span>
+                    </div>
+                    <div className="seat-stack">{hp?.stack ?? player.stack}</div>
+                    <div className="seat-cards">
+                      {isMe || hand.street === 'waiting'
+                        ? (hp?.holeCards?.join(' ') || '–')
+                        : (hp?.holeCards ? '🂠 🂠' : '–')}
+                    </div>
+                    <div className="seat-action">
+                      {hp?.folded ? 'Folded' : hp?.allIn ? 'All-in' : hp?.lastAction || '–'}
+                    </div>
+                  </>
+                ) : (
+                  <div className="seat-empty-label">Seat {seatNo}</div>
+                )}
               </div>
             )
           })}
