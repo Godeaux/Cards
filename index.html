@@ -6,11 +6,13 @@
     <title>Cards — Static MVP</title>
     <style>
       :root { color-scheme: dark; font-family: Inter, system-ui, Arial, sans-serif; }
-      body { margin: 0; background: #0b0f1a; color: #e8ecf3; overflow: hidden; }
+      html, body { margin: 0; height: 100%; }
+      body { background: #0b0f1a; color: #e8ecf3; overflow: hidden; }
       .app {
         max-width: 1100px;
         margin: 0 auto;
-        height: 100vh;
+        height: 100vh;          /* fallback */
+        height: 100dvh;         /* dynamic — shrinks when URL bar is visible */
         padding: 6px;
         box-sizing: border-box;
         display: grid;
@@ -183,14 +185,15 @@
         .action-bar { background: #10192a; padding: 4px; border:1px solid #2d3a59; border-radius: 8px; }
         .action-row { gap:4px; }
         .action-row.bottom { grid-template-columns: 2fr 1fr 1fr; }
-        /* Cap ring so oval doesn't get lost in a 700px void */
-        .table-ring { max-height: 480px; }
-        .table-ring::before { aspect-ratio: 1.8 / 1; width: 82%; }
+        /* Ring fills viewport minus bottom panel; cap prevents giant desktop ring */
+        .table-ring { height: calc(100dvh - 215px); max-height: 560px; min-height: 300px; }
+        /* Oval height-relative so it always fills ~35% of ring — no tiny oval in big ring */
+        .table-ring::before { height: 35%; width: 88%; aspect-ratio: unset; }
         .ring-center { width: min(62%, 320px); }
         .ring-center .board .card-pill { min-width: 22px; height: 28px; font-size: .74rem; }
-        /* Seat positions — straddle 1.8:1 oval in 480px ring */
-        .seat.pos-0 { top: 18%; } .seat.pos-1 { top: 16%; } .seat.pos-2 { top: 18%; }
-        .seat.pos-4 { top: 68%; } .seat.pos-5 { top: 70%; } .seat.pos-6 { top: 68%; }
+        /* Seats straddle the 35%-height oval */
+        .seat.pos-0 { top: 24%; } .seat.pos-1 { top: 22%; } .seat.pos-2 { top: 24%; }
+        .seat.pos-4 { top: 63%; } .seat.pos-5 { top: 65%; } .seat.pos-6 { top: 63%; }
         .seat { width: 76px; font-size: .61rem; padding: 4px 5px; }
         .seat-head strong { font-size: .63rem; max-width: 42px; }
         .seat-meta { font-size: .57rem; gap: 3px; }
