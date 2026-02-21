@@ -38,6 +38,7 @@
         <h2>Game</h2>
         <div class="row">
           <button id="startBtn">Start New Hand</button>
+          <button id="flushBtn">Flush Table</button>
           <strong id="stateLine"></strong>
         </div>
         <p><strong>Board:</strong> <span id="board"></span></p>
@@ -175,10 +176,26 @@
         refresh()
       }
 
+      async function flushTable() {
+        const { error } = await supabase
+          .from('game_state')
+          .update({
+            phase: 'waiting',
+            current_turn_session_id: null,
+            pot: 0,
+            hand_state: {},
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', 1)
+        if (error) return showError(error.message)
+        refresh()
+      }
+
       $('joinBtn').onclick = join
       $('leaveBtn').onclick = leave
       $('refreshBtn').onclick = refresh
       $('startBtn').onclick = startHand
+      $('flushBtn').onclick = flushTable
 
       const channel = supabase
         .channel('cards-static-realtime')
