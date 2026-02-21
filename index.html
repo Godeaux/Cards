@@ -49,10 +49,33 @@
       .seat.pos-5 { bottom: 56px; left: 10px; }
       .seat.pos-6 { top: 50%; left: 8px; transform: translateY(-50%); }
       .seat.pos-7 { top: 56px; left: 10px; }
+      .marker { display:inline-block; font-size:.75rem; padding:2px 6px; border-radius:999px; margin-left:6px; border:1px solid #4c5f86; background:#15233c; }
+      .marker.dealer { background:#3a2c12; border-color:#caa252; color:#ffd87a; }
+      .marker.sb { background:#1a2b48; border-color:#5a86d1; color:#b8d5ff; }
+      .marker.bb { background:#3a1a44; border-color:#ae68d3; color:#efc7ff; }
+      .chip-move { position:absolute; z-index:4; background:#2a3552; border:1px solid #6f88bf; border-radius:999px; padding:4px 8px; font-size:.8rem; animation: chipFly 1s ease forwards; }
+      @keyframes chipFly {
+        0% { transform: translate(-50%, -50%) scale(.5); opacity: 0; left: 50%; top: 50%; }
+        25% { opacity: 1; }
+        100% { opacity: 0; }
+      }
+      .chip-move.pos-0 { left:50%; top:40px; }
+      .chip-move.pos-1 { right:30px; top:95px; }
+      .chip-move.pos-2 { right:24px; top:50%; }
+      .chip-move.pos-3 { right:30px; bottom:95px; }
+      .chip-move.pos-4 { left:50%; bottom:40px; }
+      .chip-move.pos-5 { left:30px; bottom:95px; }
+      .chip-move.pos-6 { left:24px; top:50%; }
+      .chip-move.pos-7 { left:30px; top:95px; }
       .seat.turn {
         border: 2px solid #ffd84d;
         box-shadow: 0 0 0 2px rgba(255,216,77,0.25) inset, 0 0 18px rgba(255,216,77,0.35);
         animation: breatheGlow 1.6s ease-in-out infinite;
+      }
+      .seat.just-turned { animation: turnPop .45s ease, breatheGlow 1.6s ease-in-out .45s infinite; }
+      @keyframes turnPop {
+        0% { transform: scale(.92); }
+        100% { transform: scale(1); }
       }
       @keyframes breatheGlow {
         0%, 100% { box-shadow: 0 0 0 2px rgba(255,216,77,0.2) inset, 0 0 10px rgba(255,216,77,0.25); }
@@ -180,6 +203,7 @@
       let currentPlayers = []
       let currentGame = {}
       let currentHand = {}
+      let lastActingSessionId = null
 
       const $ = (id) => document.getElementById(id)
       const showError = (msg) => {
@@ -291,16 +315,31 @@
           .filter(p => p.seat_no != null)
           .sort((a,b)=>a.seat_no-b.seat_no)
 
+        const seatToIdx = new Map(ringPlayers.map((p, i) => [p.seat_no, i % 8]))
         $('seats').innerHTML = ringPlayers
           .map((p, idx) => {
             const hp = hand.playersBySession?.[p.session_id]
             const isTurn = hand.actingSessionId && hand.actingSessionId === p.session_id
+            const justTurned = isTurn && lastActingSessionId && lastActingSessionId !== hand.actingSessionId
             const isFolded = !!hp?.folded
             const holeHtml = (p.session_id === sessionId || hand.street === 'waiting')
               ? cardsHtml(hp?.holeCards || [], false, 2, dealingNow)
               : cardsHtml([], true, 2, dealingNow)
-            return `<div class="seat pos-${idx % 8} ${isTurn ? 'turn' : ''} ${isFolded ? 'folded' : ''}"><strong>Seat ${p.seat_no}: ${p.username}</strong>${isTurn ? '<span class="turn-badge">◀ TURN</span>' : ''}<br/>Stack: ${hp?.stack ?? p.stack} • Hole: ${holeHtml} • Bet: ${hp?.currentBet ?? 0} • Last: ${hp?.lastAction || '-'}</div>`
+            const dealerTag = hand.dealerSeat === p.seat_no ? '<span class="marker dealer">D</span>' : ''
+            const sbTag = hand.sbSeat === p.seat_no ? '<span class="marker sb">SB</span>' : ''
+            const bbTag = hand.bbSeat === p.seat_no ? '<span class="marker bb">BB</span>' : ''
+            return `<div class="seat pos-${idx % 8} ${isTurn ? 'turn' : ''} ${justTurned ? 'just-turned' : ''} ${isFolded ? 'folded' : ''}"><strong>Seat ${p.seat_no}: ${p.username}</strong>${dealerTag}${sbTag}${bbTag}${isTurn ? '<span class="turn-badge">◀ TURN</span>' : ''}<br/>Stack: ${hp?.stack ?? p.stack} • Hole: ${holeHtml} • Bet: ${hp?.currentBet ?? 0} • Last: ${hp?.lastAction || '-'}</div>`
           }).join('')
+
+        const move = hand.lastChipMove
+        if (move && Date.now() - (move.ts || 0) < 1200) {
+          const idx = seatToIdx.get(move.seat)
+          if (idx !== undefined) {
+            $('seats').innerHTML += `<div class="chip-move pos-${idx}">🪙 ${move.label}: +${move.amount}</div>`
+          }
+        }
+
+        lastActingSessionId = hand.actingSessionId || null
 
         const log = hand.actionLog || []
         $('log').innerHTML = log.length ? log.slice(-16).map(x => `<li>${x}</li>`).join('') : '<li class="muted">No actions yet.</li>'
@@ -398,7 +437,10 @@
           currentBet: BB,
           minRaise: BB,
           dealerSeat,
+          sbSeat,
+          bbSeat,
           actingSessionId,
+          lastChipMove: { seat: bbSeat, amount: pot, ts: Date.now(), label: 'blinds' },
           playersBySession,
           actionLog: [`Hand #${(currentGame.hand_no||0)+1} started`, `Blinds posted ${SB}/${BB}`],
           winnerSummary: null,
@@ -537,18 +579,22 @@
           commit(toCall)
           me.actedStreet = true
           me.lastAction = `call ${toCall}`
+          state.lastChipMove = { seat: me.seat_no, amount: toCall, ts: Date.now(), label: 'call' }
           state.actionLog.push(`${me.username}: call ${toCall}`)
         } else if (type === 'raise') {
           const target = Number($('raiseTo').value || 0)
           if (!(target > state.currentBet)) return showError('Raise-to must be greater than current bet')
-          commit(target - me.currentBet)
+          const addAmt = target - me.currentBet
+          commit(addAmt)
           state.minRaise = Math.max(state.minRaise, target - state.currentBet)
           state.currentBet = me.currentBet
           me.actedStreet = true
           me.lastAction = `raise to ${me.currentBet}`
+          state.lastChipMove = { seat: me.seat_no, amount: addAmt, ts: Date.now(), label: 'raise' }
           state.actionLog.push(`${me.username}: raise to ${me.currentBet}`)
           for (const p of Object.values(state.playersBySession)) if (p.session_id !== me.session_id && !p.folded && !p.allIn) p.actedStreet = false
         } else if (type === 'allin') {
+          const shoveAmt = me.stack
           commit(me.stack)
           if (me.currentBet > state.currentBet) {
             state.minRaise = Math.max(state.minRaise, me.currentBet - state.currentBet)
@@ -557,6 +603,7 @@
           }
           me.actedStreet = true
           me.lastAction = 'all-in'
+          state.lastChipMove = { seat: me.seat_no, amount: shoveAmt, ts: Date.now(), label: 'all-in' }
           state.actionLog.push(`${me.username}: all-in (${me.currentBet})`)
         }
 
