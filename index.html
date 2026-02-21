@@ -11,11 +11,11 @@
         max-width: 1100px;
         margin: 0 auto;
         height: 100vh;
-        padding: 44px 8px 8px;
+        padding: 8px;
         box-sizing: border-box;
         display: grid;
         grid-template-rows: auto 1fr auto;
-        gap: 8px;
+        gap: 6px;
         overflow: hidden;
       }
       section { margin-top: 0; background: #141c2d; border: 1px solid #25304a; border-radius: 12px; padding: 10px; min-height: 0; }
@@ -67,9 +67,13 @@
         left: 50%;
         top: 50%;
         transform: translate(-50%, -50%);
-        width: min(52%, 360px);
+        width: min(60%, 420px);
         z-index: 2;
+        text-align: center;
       }
+      .ring-center .table-shell { padding: 8px 10px; }
+      .ring-center .chips { justify-content: center; flex-wrap: wrap; gap: 4px; margin-bottom: 5px; }
+      .ring-center .board { justify-content: center; }
       /* Seat cards — compact, absolutely positioned around the oval */
       .seat { background: #0d1320; border: 1.5px solid #2a3a5a; border-radius: 10px; padding: 6px 7px; position: absolute; width: 92px; font-size: .72rem; transition: border-color .2s ease, box-shadow .2s ease, opacity .25s ease, filter .25s ease; box-sizing: border-box; }
 .seat-head { display:flex; align-items:center; gap:3px; flex-wrap:wrap; margin-bottom:3px; }
@@ -121,7 +125,8 @@
       .turn-badge { color: #ffdf66; font-weight: 700; margin-left: 8px; }
       .muted { color: #a6b0c2; }
       button:disabled { opacity: 0.45; cursor: not-allowed; }
-      .top-game { grid-row: 1; }
+      .top-bar { grid-row: 1; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 4px 2px; }
+      .top-bar button { padding: 6px 12px; font-size: .8rem; }
       .main-table { grid-row: 2; display: flex; flex-direction: column; min-height: 0; }
       .bottom-actions { grid-row: 3; }
 
@@ -154,63 +159,69 @@
       .chips { display:inline-flex; gap:8px; align-items:center; }
       .chip { background:#1b2740; border:1px solid #3d547f; border-radius:999px; padding:4px 10px; font-size:0.9rem; }
       @media (max-width: 520px) {
-        .app { padding: 40px 4px 4px; gap: 4px; }
-        h1, .app > p.muted { display: none; }
-        h2 { font-size: .9rem; margin-bottom: 4px; }
-        section { padding: 6px; border-radius: 8px; }
+        .app { padding: 4px; gap: 4px; }
+        h2 { font-size: .85rem; margin-bottom: 3px; }
+        .top-bar { gap: 4px; }
+        .top-bar button { padding: 5px 8px; font-size: .76rem; }
+        section { padding: 5px; border-radius: 8px; }
         .row { gap: 4px; }
         input, button { box-sizing: border-box; padding: 6px 7px; font-size: .8rem; }
-        .top-game .row button { padding: 5px 7px; }
         .join-drop { min-width: 220px; }
         .join-drop input, .join-drop button { padding: 6px 8px; font-size: .78rem; }
-        .chips { gap: 4px; }
-        .chip { padding: 2px 7px; font-size: .72rem; }
-        .card-pill { min-width: 30px; height: 36px; font-size: .85rem; }
+        .chips { gap: 3px; }
+        .chip { padding: 2px 6px; font-size: .68rem; }
+        .card-pill { min-width: 28px; height: 34px; font-size: .82rem; }
         .action-bar { background: #10192a; padding: 4px; border:1px solid #2d3a59; border-radius: 8px; }
         .action-row { gap:4px; }
         .action-row.bottom { grid-template-columns: 2fr 1fr 1fr; }
         .table-ring { min-height: 260px; }
-        .seat { width: 78px; font-size: .62rem; padding: 4px 5px; }
-        .seat-head strong { font-size: .64rem; max-width: 44px; }
-        .seat-meta { font-size: .58rem; gap: 4px; }
-        .seat .card-pill { min-width: 20px; height: 26px; font-size: .72rem; }
-        #log { display: none; }
+        .ring-center { width: min(68%, 340px); }
+        .ring-center .board .card-pill { min-width: 22px; height: 28px; font-size: .74rem; }
+        .seat { width: 76px; font-size: .61rem; padding: 4px 5px; }
+        .seat-head strong { font-size: .63rem; max-width: 42px; }
+        .seat-meta { font-size: .57rem; gap: 3px; }
+        .seat .card-pill { min-width: 20px; height: 26px; font-size: .7rem; }
       }
     </style>
   </head>
   <body>
     <main class="app">
-      <h1>Cards — Static HTML MVP</h1>
-      <p class="muted">Direct GitHub Pages app with full playable hand loop.</p>
       <div id="error" class="error" style="display:none"></div>
 
-      <section class="top-game">
-        <h2>Game Table</h2>
-        <div class="row">
-          <button id="startBtn">▶️ Start</button>
-          <button id="flushBtn">🧹 Flush</button>
-          <strong id="stateLine"></strong>
-        </div>
-        <div class="table-shell" style="margin-top:6px">
-          <div class="chips">
-            <span class="chip" id="potChip">Pot: 0</span>
-            <span class="chip" id="streetChip">Street: waiting</span>
-            <span class="chip" id="turnChip">Turn: -</span>
-            <span class="chip" id="dealerChip">Dealer: -</span>
-            <span class="chip" id="playersChip">Players: 0</span>
-            <span class="chip" id="betChip">Current Bet: 0</span>
+      <!-- Compact top bar: controls only -->
+      <div class="top-bar">
+        <button id="startBtn">▶️ Start</button>
+        <button id="flushBtn">🧹 Flush</button>
+        <strong id="stateLine"></strong>
+        <span class="chip muted" id="playersChip" style="margin-left:auto">Players: 0</span>
+      </div>
+
+      <!-- Table Seats — fills middle, game info lives inside the oval -->
+      <section class="main-table">
+        <div class="table-ring">
+          <div class="ring-center">
+            <div class="table-shell">
+              <div class="chips">
+                <span class="chip" id="potChip">Pot: 0</span>
+                <span class="chip" id="streetChip">Street: waiting</span>
+                <span class="chip" id="dealerChip">D: -</span>
+                <span class="chip" id="betChip">Bet: 0</span>
+              </div>
+              <div class="board" id="board"></div>
+            </div>
           </div>
-          <div class="board" id="board"></div>
+          <div id="seats"></div>
         </div>
+        <div class="muted" id="log" style="font-size:.75rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding: 2px 4px;">No actions yet.</div>
       </section>
 
+      <!-- Your Hand & Actions -->
       <section class="bottom-actions">
-        <h2>Your Hand & Actions</h2>
+        <h2>Your Hand <span class="muted" id="actionState" style="font-weight:400; font-size:.82rem">— waiting</span></h2>
         <div class="board" id="myHand"></div>
-        <div class="row">
+        <div class="row" style="margin-top:4px">
           <span id="toCall">To call: 0</span>
           <span id="myStack">Stack: -</span>
-          <strong id="actionState" class="action-note">Status: waiting</strong>
         </div>
         <div class="action-bar">
           <div class="action-row top">
@@ -225,24 +236,6 @@
           </div>
         </div>
       </section>
-
-      <section class="main-table">
-        <h2>Table Seats</h2>
-        <div class="table-ring">
-          <div class="ring-center">
-            <div class="table-shell">
-              <div class="chips">
-                <span class="chip" id="potChip2">Pot: 0</span>
-                <span class="chip" id="streetChip2">Street: waiting</span>
-                <span class="chip" id="turnChip2">Turn: -</span>
-              </div>
-            </div>
-          </div>
-          <div id="seats"></div>
-        </div>
-      </section>
-
-      <div class="muted" id="log" style="font-size:.82rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">No actions yet.</div>
     </main>
 
     <!-- Floating join panel -->
@@ -382,14 +375,10 @@
         const acting = currentPlayers.find(p => p.session_id === hand.actingSessionId)
         $('stateLine').textContent = `Hand #${currentGame.hand_no || 0}`
         $('potChip').textContent = `Pot: ${pot}`
-        $('streetChip').textContent = `Street: ${street}`
-        $('turnChip').textContent = `Turn: ${acting ? acting.username : '-'}`
-        $('dealerChip').textContent = `Dealer: ${hand.dealerSeat ?? '-'}`
+        $('streetChip').textContent = `${street}`
+        $('dealerChip').textContent = `D: ${hand.dealerSeat ?? '-'}`
         $('playersChip').textContent = `Players: ${currentPlayers.filter(p => p.seat_no != null).length}`
-        $('betChip').textContent = `Current Bet: ${hand.currentBet || 0}`
-        $('potChip2').textContent = `Pot: ${pot}`
-        $('streetChip2').textContent = `Street: ${street}`
-        $('turnChip2').textContent = `Turn: ${acting ? acting.username : '-'}`
+        $('betChip').textContent = `Bet: ${hand.currentBet || 0}`
         $('board').innerHTML = boardSlotsHtml(hand.boardCards || [], dealingNow)
         $('myHand').innerHTML = meHp?.holeCards?.length ? cardsHtml(meHp.holeCards, false, 2, dealingNow) : '<span class="muted">No cards (join + start hand)</span>'
 
@@ -398,7 +387,7 @@
         $('myStack').textContent = `Stack: ${meHp?.stack ?? me?.stack ?? '-'}`
 
         const myTurn = hand.actingSessionId && hand.actingSessionId === sessionId
-        $('actionState').textContent = myTurn ? 'Status: 🟡 Your turn' : 'Status: ⏳ Waiting'
+        $('actionState').textContent = myTurn ? '— 🟡 Your turn' : '— ⏳ waiting'
         $('foldBtn').disabled = !myTurn
         $('checkBtn').disabled = !myTurn || toCall > 0
         $('callBtn').disabled = !myTurn || toCall === 0
@@ -640,16 +629,16 @@
       }
 
       async function act(type) {
-        $('actionState').textContent = `Status: ⌛ Sending ${type}...`
+        $('actionState').textContent = `— ⌛ sending ${type}…`
         await refresh()
         const state = structuredClone(currentHand)
         if (!state?.actingSessionId || state.actingSessionId !== sessionId) {
-          $('actionState').textContent = 'Status: not your turn'
+          $('actionState').textContent = '— not your turn'
           return
         }
         const me = state.playersBySession[sessionId]
         if (!me || me.folded || me.allIn) {
-          $('actionState').textContent = 'Status: action unavailable'
+          $('actionState').textContent = '— action unavailable'
           return
         }
 
@@ -724,7 +713,7 @@
 
         await saveHand(state)
         await refresh()
-        $('actionState').textContent = `Status: ✅ ${type} sent`
+        $('actionState').textContent = `— ✅ ${type} sent`
       }
 
       async function flushTable() {
