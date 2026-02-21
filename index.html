@@ -14,6 +14,8 @@
       button { cursor: pointer; background: #233050; }
       .error { margin-top: 12px; background: #381a1a; border: 1px solid #6f2d2d; color: #ffd4d4; padding: 10px; border-radius: 8px; }
       .seat { background: #0d1320; border: 1px solid #2d3a59; border-radius: 10px; padding: 8px; margin-bottom: 8px; }
+      .seat.turn { border: 2px solid #4f7cff; box-shadow: 0 0 0 2px rgba(79,124,255,0.2) inset; }
+      .turn-badge { color: #9fc1ff; font-weight: 700; margin-left: 8px; }
       .muted { color: #a6b0c2; }
     </style>
   </head>
@@ -52,6 +54,13 @@
       <section>
         <h2>Seats</h2>
         <div id="seats"></div>
+      </section>
+
+      <section>
+        <h2>Options</h2>
+        <div class="row">
+          <button id="clearLobbyBtn">Clear Entire Lobby</button>
+        </div>
       </section>
     </main>
 
@@ -114,7 +123,8 @@
           .map(p => {
             const hp = hand.playersBySession?.[p.session_id]
             const hole = p.session_id === sessionId ? (hp?.holeCards?.join(' ') || '-') : '🂠 🂠'
-            return `<div class="seat"><strong>Seat ${p.seat_no}: ${p.username}</strong><br/>Stack: ${hp?.stack ?? p.stack} • Hole: ${hole} • Last: ${hp?.lastAction || '-'}</div>`
+            const isTurn = hand.actingSessionId && hand.actingSessionId === p.session_id
+            return `<div class="seat ${isTurn ? 'turn' : ''}"><strong>Seat ${p.seat_no}: ${p.username}</strong>${isTurn ? '<span class="turn-badge">◀ YOUR TURN</span>' : ''}<br/>Stack: ${hp?.stack ?? p.stack} • Hole: ${hole} • Last: ${hp?.lastAction || '-'}</div>`
           }).join('')
       }
 
@@ -191,11 +201,37 @@
         refresh()
       }
 
+      async function clearEntireLobby() {
+        const ok = confirm('Clear entire lobby and reset table?')
+        if (!ok) return
+
+        const del = await supabase.from('lobby_players').delete().neq('session_id', '')
+        if (del.error) return showError(del.error.message)
+
+        const reset = await supabase
+          .from('game_state')
+          .update({
+            hand_no: 0,
+            phase: 'waiting',
+            dealer_seat: null,
+            current_turn_session_id: null,
+            pot: 0,
+            hand_state: {},
+            showdown_state: {},
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', 1)
+        if (reset.error) return showError(reset.error.message)
+
+        refresh()
+      }
+
       $('joinBtn').onclick = join
       $('leaveBtn').onclick = leave
       $('refreshBtn').onclick = refresh
       $('startBtn').onclick = startHand
       $('flushBtn').onclick = flushTable
+      $('clearLobbyBtn').onclick = clearEntireLobby
 
       const channel = supabase
         .channel('cards-static-realtime')
