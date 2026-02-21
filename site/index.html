@@ -14,9 +14,18 @@
       button { cursor: pointer; background: #233050; }
       .error { margin-top: 12px; background: #381a1a; border: 1px solid #6f2d2d; color: #ffd4d4; padding: 10px; border-radius: 8px; }
       .seat { background: #0d1320; border: 1px solid #2d3a59; border-radius: 10px; padding: 8px; margin-bottom: 8px; }
-      .seat.turn { border: 2px solid #4f7cff; box-shadow: 0 0 0 2px rgba(79,124,255,0.2) inset; }
-      .turn-badge { color: #9fc1ff; font-weight: 700; margin-left: 8px; }
+      .seat.turn {
+        border: 2px solid #ffd84d;
+        box-shadow: 0 0 0 2px rgba(255,216,77,0.25) inset, 0 0 18px rgba(255,216,77,0.35);
+        animation: breatheGlow 1.6s ease-in-out infinite;
+      }
+      @keyframes breatheGlow {
+        0%, 100% { box-shadow: 0 0 0 2px rgba(255,216,77,0.2) inset, 0 0 10px rgba(255,216,77,0.25); }
+        50% { box-shadow: 0 0 0 2px rgba(255,216,77,0.45) inset, 0 0 24px rgba(255,216,77,0.65); }
+      }
+      .turn-badge { color: #ffdf66; font-weight: 700; margin-left: 8px; }
       .muted { color: #a6b0c2; }
+      button:disabled { opacity: 0.45; cursor: not-allowed; }
     </style>
   </head>
   <body>
@@ -52,6 +61,7 @@
         <div class="row">
           <span id="toCall">To call: 0</span>
           <span id="myStack">Stack: -</span>
+          <strong id="actionState">Status: waiting</strong>
         </div>
         <div class="row" style="margin-top:10px">
           <button id="foldBtn">Fold</button>
@@ -181,6 +191,7 @@
         $('myStack').textContent = `Stack: ${meHp?.stack ?? me?.stack ?? '-'}`
 
         const myTurn = hand.actingSessionId && hand.actingSessionId === sessionId
+        $('actionState').textContent = myTurn ? 'Status: 🟡 Your turn' : 'Status: ⏳ Waiting'
         $('foldBtn').disabled = !myTurn
         $('checkBtn').disabled = !myTurn || toCall > 0
         $('callBtn').disabled = !myTurn || toCall === 0
@@ -381,11 +392,18 @@
       }
 
       async function act(type) {
+        $('actionState').textContent = `Status: ⌛ Sending ${type}...`
         await refresh()
         const state = structuredClone(currentHand)
-        if (!state?.actingSessionId || state.actingSessionId !== sessionId) return
+        if (!state?.actingSessionId || state.actingSessionId !== sessionId) {
+          $('actionState').textContent = 'Status: not your turn'
+          return
+        }
         const me = state.playersBySession[sessionId]
-        if (!me || me.folded || me.allIn) return
+        if (!me || me.folded || me.allIn) {
+          $('actionState').textContent = 'Status: action unavailable'
+          return
+        }
 
         const toCall = Math.max(0, state.currentBet - me.currentBet)
         const commit = (n) => {
@@ -453,6 +471,7 @@
 
         await saveHand(state)
         await refresh()
+        $('actionState').textContent = `Status: ✅ ${type} sent`
       }
 
       async function flushTable() {
