@@ -28,7 +28,7 @@
       button:hover { background: #2d4169; }
       .error { margin-top: 12px; background: #381a1a; border: 1px solid #6f2d2d; color: #ffd4d4; padding: 10px; border-radius: 8px; }
       .table-shell { background: radial-gradient(circle at center, #1f6b3f 0%, #124a2c 60%, #0c351f 100%); border: 2px solid #8a6a2f; border-radius: 22px; padding: 14px; }
-      .board { display: flex; gap: 8px; flex-wrap: wrap; min-height: 44px; align-items: center; }
+      .board { display: flex; gap: 6px; flex-wrap: wrap; min-height: 34px; align-items: center; }
       .card-pill { display:inline-flex; align-items:center; justify-content:center; min-width:38px; height:46px; border-radius:8px; border:1px solid #5a6b8f; background:#f5f7ff; color:#0a0f1d; font-weight:800; }
       .card-pill.red { color:#b3132c; }
       .card-pill.deal { animation: dealIn .45s ease; transform-origin: center; }
@@ -143,16 +143,19 @@
       <section class="top-game">
         <h2>Game Table</h2>
         <div class="row">
-          <button id="startBtn">▶️ Start New Hand</button>
-          <button id="flushBtn">🧹 Flush Table</button>
+          <button id="startBtn">▶️ Start</button>
+          <button id="flushBtn">🧹 Flush</button>
           <strong id="stateLine"></strong>
         </div>
-        <div class="table-shell" style="margin-top:10px">
+        <div class="table-shell" style="margin-top:6px">
           <div class="chips">
             <span class="chip" id="potChip">Pot: 0</span>
             <span class="chip" id="streetChip">Street: waiting</span>
+            <span class="chip" id="turnChip">Turn: -</span>
+            <span class="chip" id="dealerChip">Dealer: -</span>
+            <span class="chip" id="playersChip">Players: 0</span>
+            <span class="chip" id="betChip">Current Bet: 0</span>
           </div>
-          <p style="margin:8px 0 4px"><strong>Board</strong></p>
           <div class="board" id="board"></div>
         </div>
       </section>
@@ -183,9 +186,8 @@
               <div class="chips">
                 <span class="chip" id="potChip2">Pot: 0</span>
                 <span class="chip" id="streetChip2">Street: waiting</span>
+                <span class="chip" id="turnChip2">Turn: -</span>
               </div>
-              <p style="margin:8px 0 4px"><strong>Board</strong></p>
-              <div class="board" id="board2"></div>
             </div>
           </div>
           <div id="seats"></div>
@@ -251,6 +253,11 @@
         const dealClass = dealing ? ' deal' : ''
         return cards.map(c => cardHtml(c).replace('card-pill', `card-pill${dealClass}`)).join(' ')
       }
+      const boardSlotsHtml = (cards = [], dealing = false) => {
+        const shown = cards.map(c => cardHtml(c).replace('card-pill', `card-pill${dealing ? ' deal' : ''}`))
+        const hidden = Array.from({ length: Math.max(0, 5 - cards.length) }).map(() => `<span class="card-pill">🂠</span>`)
+        return [...shown, ...hidden].join(' ')
+      }
 
       const nextSeat = (from, seats) => {
         const sorted = [...seats].sort((a,b)=>a-b)
@@ -302,13 +309,18 @@
         const pot = hand.pot || currentGame.pot || 0
         const dealingNow = hand.startedAt && (Date.now() - new Date(hand.startedAt).getTime() < 2200)
 
+        const acting = currentPlayers.find(p => p.session_id === hand.actingSessionId)
         $('stateLine').textContent = `Hand #${currentGame.hand_no || 0}`
         $('potChip').textContent = `Pot: ${pot}`
         $('streetChip').textContent = `Street: ${street}`
+        $('turnChip').textContent = `Turn: ${acting ? acting.username : '-'}`
+        $('dealerChip').textContent = `Dealer: ${hand.dealerSeat ?? '-'}`
+        $('playersChip').textContent = `Players: ${currentPlayers.filter(p => p.seat_no != null).length}`
+        $('betChip').textContent = `Current Bet: ${hand.currentBet || 0}`
         $('potChip2').textContent = `Pot: ${pot}`
         $('streetChip2').textContent = `Street: ${street}`
-        $('board').innerHTML = cardsHtml(hand.boardCards)
-        $('board2').innerHTML = cardsHtml(hand.boardCards)
+        $('turnChip2').textContent = `Turn: ${acting ? acting.username : '-'}`
+        $('board').innerHTML = boardSlotsHtml(hand.boardCards || [], dealingNow)
         $('myHand').innerHTML = meHp?.holeCards?.length ? cardsHtml(meHp.holeCards, false, 2, dealingNow) : '<span class="muted">No cards (join + start hand)</span>'
 
         const toCall = meHp ? Math.max(0, (hand.currentBet || 0) - (meHp.currentBet || 0)) : 0
