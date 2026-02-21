@@ -416,7 +416,7 @@
             const isTurn = hand.actingSessionId && hand.actingSessionId === p.session_id
             const justTurned = isTurn && lastActingSessionId && lastActingSessionId !== hand.actingSessionId
             const isFolded = !!hp?.folded
-            const holeHtml = (p.session_id === sessionId || hand.street === 'waiting')
+            const holeHtml = (p.session_id === sessionId || hand.street === 'showdown')
               ? cardsHtml(hp?.holeCards || [], false, 2, dealingNow)
               : cardsHtml([], true, 2, dealingNow)
             const dealerTag = hand.dealerSeat === p.seat_no ? '<span class="marker dealer">D</span>' : ''
