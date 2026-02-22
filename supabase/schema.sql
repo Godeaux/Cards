@@ -26,12 +26,13 @@ create table if not exists public.game_state (
   hand_no int not null default 0,
   phase text not null default 'waiting',
   dealer_seat int,
- current_turn_session_id text,
- pot int not null default 0,
- showdown_state jsonb not null default '{}'::jsonb,
- hand_state jsonb not null default '{}'::jsonb,
- last_action_at timestamptz,
- updated_at timestamptz not null default now()
+  current_turn_session_id text,
+  pot int not null default 0,
+  version int not null default 0,
+  showdown_state jsonb not null default '{}'::jsonb,
+  hand_state jsonb not null default '{}'::jsonb,
+  last_action_at timestamptz,
+  updated_at timestamptz not null default now()
 );
 
 alter table public.game_state

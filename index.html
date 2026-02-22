@@ -346,11 +346,13 @@
       const getMyHandPlayer = () => currentHand.playersBySession?.[sessionId]
 
       async function saveHand(state) {
+        const version = (currentGame.version || 0) + 1
         const { error } = await supabase.from('game_state').update({
           phase: state.street || 'waiting',
           current_turn_session_id: state.actingSessionId || null,
           pot: state.pot || 0,
           hand_state: state,
+          version,
           updated_at: new Date().toISOString(),
           last_action_at: new Date().toISOString(),
         }).eq('id', 1)
@@ -443,7 +445,7 @@
         $('log').textContent = log.length ? `Recent: ${log.slice(-1)[0]}` : 'No actions yet.'
       }
 
-      async function refresh() {
+      async function refresh(source = 'manual') {
         showError('')
         const [pRes, gRes] = await Promise.all([
           supabase.from('lobby_players').select('*').order('seat_no', { ascending: true }),
@@ -452,10 +454,13 @@
         if (pRes.error) return showError(pRes.error.message)
         if (gRes.error) return showError(gRes.error.message)
 
+        const newVersion = gRes.data?.version
+        const changed = newVersion !== currentGame?.version
         currentPlayers = pRes.data || []
         currentGame = gRes.data || {}
         currentHand = currentGame.hand_state || {}
-        render()
+        console.log(`[refresh] ${source} v${newVersion}${changed ? ' (changed)' : ' (no-op)'}`)
+        if (changed) render()
       }
 
       async function join() {
@@ -475,16 +480,16 @@
         }, { onConflict: 'session_id' })
         if (error) return showError(error.message)
         document.getElementById('joinDrop').hidden = true
-        refresh()
+        refresh('join')
       }
 
       async function leave() {
         await supabase.from('lobby_players').delete().eq('session_id', sessionId)
-        refresh()
+        refresh('leave')
       }
 
       async function startHand() {
-        await refresh()
+        await refresh('start')
         const seated = currentPlayers.filter(p => p.seat_no != null).sort((a,b)=>a.seat_no-b.seat_no)
         if (seated.length < 2) return showError('Need at least 2 players')
 
@@ -545,9 +550,10 @@
           winnerSummary: null,
         }
 
-        await supabase.from('game_state').update({ hand_no: (currentGame.hand_no||0)+1, dealer_seat: dealerSeat }).eq('id',1)
+        const v = (currentGame.version || 0) + 1
+        await supabase.from('game_state').update({ hand_no: (currentGame.hand_no||0)+1, dealer_seat: dealerSeat, version: v }).eq('id',1)
         await saveHand(hand_state)
-        await refresh()
+        await refresh('hand-started')
       }
 
       function nextActing(state, fromSession) {
@@ -641,7 +647,7 @@
 
       async function act(type) {
         $('actionState').textContent = `— ⌛ sending ${type}…`
-        await refresh()
+        await refresh('act')
         const state = structuredClone(currentHand)
         if (!state?.actingSessionId || state.actingSessionId !== sessionId) {
           $('actionState').textContent = '— not your turn'
@@ -709,41 +715,43 @@
         const live = Object.values(state.playersBySession).filter(p => !p.folded)
         if (live.length <= 1) {
           await finalize(state)
-          return refresh()
+          return refresh('finalize')
         }
 
         if (streetResolved(state)) {
           dealNextStreet(state)
           if (state.street === 'showdown' || state.street === 'waiting') {
             await finalize(state)
-            return refresh()
+            return refresh('street-done')
           }
         } else {
           state.actingSessionId = nextActing(state, sessionId)
         }
 
         await saveHand(state)
-        await refresh()
+        await refresh('act-done')
         $('actionState').textContent = `— ✅ ${type} sent`
       }
 
       async function flushTable() {
+        const v = (currentGame.version || 0) + 1
         const { error } = await supabase.from('game_state').update({
-          phase: 'waiting', current_turn_session_id: null, pot: 0, hand_state: {}, updated_at: new Date().toISOString(),
+          phase: 'waiting', current_turn_session_id: null, pot: 0, hand_state: {}, version: v, updated_at: new Date().toISOString(),
         }).eq('id', 1)
         if (error) return showError(error.message)
-        refresh()
+        refresh('flush')
       }
 
       async function clearEntireLobby() {
         if (!confirm('Clear entire lobby and reset table?')) return
         const del = await supabase.from('lobby_players').delete().neq('session_id', '')
         if (del.error) return showError(del.error.message)
+        const v = (currentGame.version || 0) + 1
         const reset = await supabase.from('game_state').update({
-          hand_no: 0, phase: 'waiting', dealer_seat: null, current_turn_session_id: null, pot: 0, hand_state: {}, showdown_state: {}, updated_at: new Date().toISOString(),
+          hand_no: 0, phase: 'waiting', dealer_seat: null, current_turn_session_id: null, pot: 0, hand_state: {}, showdown_state: {}, version: v, updated_at: new Date().toISOString(),
         }).eq('id', 1)
         if (reset.error) return showError(reset.error.message)
-        refresh()
+        refresh('clear')
       }
 
       $('joinBtn').onclick = join
@@ -770,11 +778,11 @@
 
       const channel = supabase
         .channel('cards-static-realtime')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'lobby_players' }, refresh)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'game_state' }, refresh)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'lobby_players' }, () => refresh('rt:lobby'))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'game_state' }, () => refresh('rt:game'))
         .subscribe()
 
-      refresh()
+      refresh('init')
       setInterval(async () => {
         await supabase.from('lobby_players').update({ heartbeat_at: new Date().toISOString() }).eq('session_id', sessionId)
       }, 15000)
